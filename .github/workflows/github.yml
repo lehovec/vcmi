@@ -28,20 +28,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: msvc-x64
-            arch: x64
-            toolset: '14.29'
-            os: windows-2025-vs2026
-            pack: 1
-            upload: 0
-            pack_type: RelWithDebInfo
-            extension: zip
-            preset: windows-msvc-ninja-release
-            conan_profile: msvc-x64
-            conan_prebuilts: dependencies-windows-x64
-            conan_options: -s "&:build_type=RelWithDebInfo" -o "&:target_pre_windows10=True"
-            artifact_platform: x64
-
           - platform: linux-appimage-x64
             os: ubuntu-24.04
             upload: 1
@@ -201,7 +187,7 @@ jobs:
         outFolder=conan-generated
         conan install . \
           --output-folder="$outFolder" \
-          --build=never \
+          --build=missing \
           --profile=dependencies/conan_profiles/${{ matrix.conan_profile }} \
           --conf="tools.cmake.cmaketoolchain:generator=Ninja" \
           ${{ matrix.conan_options }} \
