@@ -21,7 +21,10 @@ public:
 	virtual ~IMapObjectObserver();
 
 	virtual bool hasOngoingAnimations() = 0;
+	/// Returns once the animations ended, or once the mobile app is in the background
 	virtual void waitForOngoingAnimations(){};
+	/// Ends the animations in progress at once, with the state they would end with
+	virtual void finishOngoingAnimations(){};
 	virtual void endNetwork(){};
 
 	/// Plays fade-in animation and adds object to map

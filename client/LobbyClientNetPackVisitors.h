@@ -36,6 +36,7 @@ public:
 	void visitLobbyRestartGame(LobbyRestartGame & pack) override;
 	void visitLobbyPrepareStartGame(LobbyPrepareStartGame & pack) override;
 	void visitLobbyStartGame(LobbyStartGame & pack) override;
+	void visitLobbyRejoinGame(LobbyRejoinGame & pack) override;
 	void visitLobbyModsCheck(LobbyModsCheck & pack) override;
 	void visitLobbyUpdateState(LobbyUpdateState & pack) override;
 };

@@ -62,6 +62,9 @@ class ReplayPackFilter final : public ICPackVisitor
 	void visitResponseStatistic(ResponseStatistic & pack) override { markInteractive(); }
 	void visitSystemMessage(SystemMessage & pack) override { markInteractive(); }
 	void visitPlayerMessageClient(PlayerMessageClient & pack) override { markInteractive(); }
+	// a rejoining client receives these for state that the replay already shows
+	void visitPackRepeatedOnRejoin(PackRepeatedOnRejoin & pack) override { markInteractive(); }
+	void visitBattleResumed(BattleResumed & pack) override { markInteractive(); }
 
 	// combat packs - either all of them are shown, or none of them, so that the battle interface
 	// is never left half-initialized

@@ -36,10 +36,22 @@ bool CMapHandler::hasOngoingAnimations()
 
 void CMapHandler::waitForOngoingAnimations()
 {
-	for(auto * observer : observers)
+	// observers may be replaced while the interface mutex is released for the wait, e.g. on screen resize
+	while(true)
 	{
-		if (observer->hasOngoingAnimations())
-			observer->waitForOngoingAnimations();
+		auto observer = std::ranges::find_if(observers, [](IMapObjectObserver * candidate)
+		{
+			return candidate->hasOngoingAnimations();
+		});
+
+		if(observer == observers.end())
+			return;
+
+		// nothing is drawn while the mobile app is in the background, so the animation would never end
+		if(ENGINE->isAppInBackground())
+			(*observer)->finishOngoingAnimations();
+		else
+			(*observer)->waitForOngoingAnimations();
 	}
 }
 

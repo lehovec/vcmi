@@ -76,6 +76,7 @@ private:
 	// IMapObjectObserver impl
 	bool hasOngoingAnimations() override;
 	void waitForOngoingAnimations() override;
+	void finishOngoingAnimations() override;
 	void endNetwork() override;
 
 	void onObjectFadeIn(const CGObjectInstance * obj, const PlayerColor & initiator) override;
@@ -95,6 +96,7 @@ private:
 
 public:
 	MapViewController(std::shared_ptr<MapViewModel> model, std::shared_ptr<MapViewCache> view);
+	~MapViewController();
 
 	std::shared_ptr<IMapRendererContext> getContext() const;
 

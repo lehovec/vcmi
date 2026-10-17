@@ -37,7 +37,9 @@
 #include "windows/GUIClasses.h"
 
 #include "../lib/CConfigHandler.h"
+#include "../lib/GameLibrary.h"
 #include "../lib/campaign/CampaignState.h"
+#include "../lib/gameState/CGameState.h"
 #include "../lib/serializer/GameConnection.h"
 #include "../lib/texts/CGeneralTextHandler.h"
 
@@ -185,6 +187,36 @@ void ApplyOnLobbyHandlerNetPackVisitor::visitLobbyStartGame(LobbyStartGame & pac
 	handler.startGameplay(pack.initializedGameState);
 }
 
+void ApplyOnLobbyHandlerNetPackVisitor::visitLobbyRejoinGame(LobbyRejoinGame & pack)
+{
+	handler.setState(EClientState::STARTING);
+	if(handler.si->mode != EStartMode::LOAD_GAME)
+	{
+		auto modeBackup = handler.si->mode;
+		handler.si = pack.initializedStartInfo;
+		handler.si->mode = modeBackup;
+	}
+
+	auto gameState = std::make_shared<CGameState>();
+	gameState->preInit(LIBRARY);
+	gameState->loadFromMemory(std::move(pack.gamestate), pack.version);
+
+	// LobbyStartGame sets it while reading the gamestate, here the gamestate is read from a buffer of its own
+	handler.logicConnection->setCallback(*gameState);
+
+	// applied before the interfaces are created, so that they show the restored state
+	for(const auto & data : pack.packsSinceGamestate)
+	{
+		auto replayedPack = ReplayPackSerializer::read(data, gameState.get(), pack.version);
+		auto & clientPack = dynamic_cast<CPackForClient &>(*replayedPack);
+		gameState->replayLog.recordPack(clientPack, *gameState);
+		gameState->apply(clientPack);
+	}
+
+	handler.client = std::make_unique<CClient>();
+	handler.startGameplay(gameState);
+}
+
 void ApplyOnLobbyScreenNetPackVisitor::visitLobbyStartGame(LobbyStartGame & pack)
 {
 	if(auto w = ENGINE->windows().topWindow<CLoadingScreen>())
@@ -214,6 +246,10 @@ void ApplyOnLobbyHandlerNetPackVisitor::visitLobbyUpdateState(LobbyUpdateState &
 {
 	pack.hostChanged = pack.state.hostClientId != handler.hostClientId;
 	static_cast<LobbyState &>(handler) = pack.state;
+
+	// the host left the game, this client takes over its AI players
+	if(pack.hostChanged && handler.isHost() && handler.client && handler.getState() == EClientState::GAMEPLAY)
+		handler.client->installInterfacesOfNewPlayers();
 	// the map info the previous texts came from is gone now
 	handler.installLobbyTexts();
 	if(handler.mapToStart && handler.mi)
@@ -262,7 +298,9 @@ void ApplyOnLobbyScreenNetPackVisitor::visitLobbyShowMessage(LobbyShowMessage & 
 	if(!lobby) //stub: ignore message for game mode
 		return;
 	
-	lobby->buttonStart->block(false);
+	// a guest can not start the game, e.g. one that was refused to rejoin a game in progress
+	if(handler.isHost())
+		lobby->buttonStart->block(false);
 	handler.showServerError(pack.message.toString(&GAME->translator()));
 }
 

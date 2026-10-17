@@ -10,6 +10,8 @@
 #include "StdInc.h"
 #include "CGameHandler.h"
 
+#include <boost/uuid/name_generator.hpp>
+
 #include "CVCMIServer.h"
 #include "TurnTimerHandler.h"
 #include "ServerNetPackVisitors.h"
@@ -20,6 +22,7 @@
 #include "processors/PlayerMessageProcessor.h"
 #include "processors/TurnOrderProcessor.h"
 #include "activities/ActivityProcessor.h"
+#include "activities/BattleActivities.h"
 #include "activities/LuaScriptActivity.h"
 #include "activities/MapActivities.h"
 #include "activities/SpellActivities.h"
@@ -38,6 +41,7 @@
 #include "../lib/int3.h"
 
 #include "../lib/battle/BattleInfo.h"
+#include "../lib/battle/Unit.h"
 #include "../lib/bonuses/BonusParameters.h"
 #include "../lib/callback/GameRandomizer.h"
 #include "../lib/campaign/CampaignState.h"
@@ -86,6 +90,7 @@
 
 #include "../lib/serializer/CSaveFile.h"
 #include "../lib/serializer/CLoadFile.h"
+#include "../lib/serializer/CMemorySerializer.h"
 
 #include "../lib/spells/CSpell.h"
 
@@ -380,7 +385,8 @@ void CGameHandler::handleClientDisconnection(GameConnectionID connectionID, cons
 		if (gameInfo().getPlayerState(player.first)->status != EPlayerStatus::INGAME)
 			continue;
 
-		if (gameServer().hasPlayerAt(player.first, connectionID))
+		// the AI players of a host that left are taken over by another client
+		if (gameServer().hasPlayerAt(player.first, connectionID) && player.second.isHuman())
 			disconnectedPlayers.push_back(player.first);
 		else
 			remainingPlayers.push_back(player.first);
@@ -408,6 +414,19 @@ void CGameHandler::handleClientDisconnection(GameConnectionID connectionID, cons
 		}
 	}
 
+	// a pause ends only by an answer of its player, the timer of an offline player keeps running instead
+	std::vector<ActivityPtr> lostPauses;
+	for (const auto & lostPlayer : disconnectedPlayers)
+	{
+		for (const auto & activity : activities->getStack(lostPlayer))
+		{
+			if (activities->activityAs<TimerPauseActivity>(activity) && !activity->isFinished())
+				lostPauses.push_back(activity);
+		}
+	}
+	for (const auto & pause : lostPauses)
+		activities->finishActivity(*pause);
+
 	for (const auto & inGamePlayer : remainingPlayers)
 	{
 		for (const auto & lostPlayer : disconnectedPlayers)
@@ -418,6 +437,245 @@ void CGameHandler::handleClientDisconnection(GameConnectionID connectionID, cons
 			out.text.replaceName(lostPlayer);
 			out.components.emplace_back(ComponentType::FLAG, lostPlayer);
 			sendAndApply(out);
+		}
+	}
+}
+
+bool CGameHandler::fillRejoinGamestate(LobbyRejoinGame & pack)
+{
+	pack.initializedStartInfo = std::make_shared<StartInfo>(*gameState().getInitialStartInfo());
+	pack.version = ESerializationVersion::CURRENT;
+
+	if(gameState().currentBattles.empty())
+	{
+		pack.gamestate = gs->saveToMemory();
+		return true;
+	}
+
+	// a battle never lasts past the day it started on, so the day started before every battle in progress
+	const auto & chapters = gameState().replayLog.getChapters();
+	if(chapters.empty() || chapters.back().day != gameState().day)
+	{
+		logGlobal->error("Battle in progress was not recorded, client can not rejoin the game");
+		return false;
+	}
+
+	pack.gamestate = chapters.back().gamestateSnapshot;
+	pack.packsSinceGamestate = chapters.back().packs;
+	return true;
+}
+
+std::vector<PlayerColor> CGameHandler::playersAtConnection(GameConnectionID connectionID) const
+{
+	std::vector<PlayerColor> result;
+
+	for(const auto & player : gameState().players)
+	{
+		if(player.second.status == EPlayerStatus::INGAME && gameServer().hasPlayerAt(player.first, connectionID))
+			result.push_back(player.first);
+	}
+
+	if(gameServer().hasPlayerAt(PlayerColor::NEUTRAL, connectionID))
+		result.push_back(PlayerColor::NEUTRAL);
+
+	return result;
+}
+
+void CGameHandler::autosaveBeforeHumanTurn()
+{
+	// battles are not part of a save, so a save made during one would lose it
+	if(gameServer().wasStartedByClient() || !gameState().currentBattles.empty())
+		return;
+
+	const auto autosavePath = SavegamePath::getAutosavePath(*gameState().getStartInfo(), *gameState().getMapHeader(), gameState().getCalendar());
+	save(autosavePath, PlayerColor::CANNOT_DETERMINE, static_cast<int>(settings["general"]["autosaveCountLimit"].Integer()));
+}
+
+void CGameHandler::notifyHumanTurnStart(PlayerColor player)
+{
+	if(!humanTurnStartListener)
+		return;
+
+	HumanTurnStart turnStart;
+	turnStart.player = player;
+	turnStart.name = gameInfo().getPlayerSettings(player)->name;
+	turnStart.day = gameState().day;
+	turnStart.online = isPlayerConnected(player);
+	if(!notificationSecret.empty())
+		turnStart.topic = notificationTopic(player);
+	humanTurnStartListener(turnStart);
+}
+
+std::string CGameHandler::notificationTopic(PlayerColor player) const
+{
+	// typed by players, so without characters that are easy to confuse
+	constexpr std::string_view alphabet = "abcdefghjkmnpqrstuvwxyz23456789";
+	constexpr int topicLength = 4;
+
+	boost::uuids::name_generator_sha1 generator(boost::uuids::ns::oid());
+	const auto hash = generator(notificationSecret + '/' + std::to_string(gameState().getStartInfo()->startTime) + '/' + player.toString());
+
+	std::string topic = "vcmi-";
+	for(int i = 0; i < topicLength; ++i)
+		topic += alphabet[*(hash.begin() + i) % alphabet.size()];
+	return topic;
+}
+
+bool CGameHandler::sendNotificationTopics(GameConnectionID connectionID)
+{
+	if(notificationSecret.empty())
+		return false;
+
+	for(const auto & player : playersAtConnection(connectionID))
+	{
+		if(!player.isValidPlayer() || !gameInfo().getPlayerState(player)->isHuman())
+			continue;
+
+		MetaString message;
+		message.appendTextID("vcmi.server.notifications.topic");
+		message.replaceName(player);
+		message.replaceRawString(notificationTopic(player));
+		playerMessages->sendSystemMessage(connectionID, message);
+	}
+	return true;
+}
+
+bool CGameHandler::hasHumanPlayerInGame() const
+{
+	for(const auto & player : gameState().players)
+	{
+		if(player.second.status == EPlayerStatus::INGAME && player.second.isHuman())
+			return true;
+	}
+	return false;
+}
+
+void CGameHandler::handleClientRejoin(GameConnectionID connectionID)
+{
+	const auto players = playersAtConnection(connectionID);
+
+	for(const auto & inGamePlayer : gameState().players)
+	{
+		if(inGamePlayer.second.status != EPlayerStatus::INGAME || vstd::contains(players, inGamePlayer.first))
+			continue;
+
+		for(const auto & rejoinedPlayer : players)
+		{
+			if(!rejoinedPlayer.isValidPlayer() || !gameInfo().getPlayerState(rejoinedPlayer)->isHuman())
+				continue;
+
+			InfoWindow out;
+			out.player = inGamePlayer.first;
+			out.text.appendTextID("vcmi.server.errors.playerRejoined");
+			out.text.replaceName(rejoinedPlayer);
+			out.components.emplace_back(ComponentType::FLAG, rejoinedPlayer);
+			sendAndApply(out);
+		}
+	}
+
+	// the turn start of another player replaces the lobby screen of the client with the adventure map
+	for(const auto & player : gameState().players)
+	{
+		if(vstd::contains(players, player.first) || !turnOrder->isPlayerMakingTurn(player.first))
+			continue;
+
+		PackRepeatedOnRejoin repeated;
+		auto turnStart = std::make_shared<PlayerStartsTurn>();
+		turnStart->player = player.first;
+		turnStart->questionID = QuestionID::NONE;
+		repeated.pack = turnStart;
+		gameServer().sendPack(repeated, connectionID);
+	}
+
+	repeatPendingPacks(connectionID, players);
+	sendNotificationTopics(connectionID);
+}
+
+void CGameHandler::handleHostChange(GameConnectionID connectionID)
+{
+	std::vector<PlayerColor> aiPlayers;
+	for(const auto & player : playersAtConnection(connectionID))
+	{
+		if(!player.isValidPlayer() || !gameInfo().getPlayerState(player)->isHuman())
+			aiPlayers.push_back(player);
+	}
+
+	repeatPendingPacks(connectionID, aiPlayers);
+}
+
+void CGameHandler::repeatPendingPacks(GameConnectionID connectionID, const std::vector<PlayerColor> & players)
+{
+	auto repeatPack = [this, connectionID](std::shared_ptr<CPackForClient> pack)
+	{
+		PackRepeatedOnRejoin repeated;
+		repeated.pack = std::move(pack);
+		gameServer().sendPack(repeated, connectionID);
+	};
+
+	for(const auto & player : players)
+	{
+		if(!player.isValidPlayer() || !turnOrder->isPlayerMakingTurn(player))
+			continue;
+
+		auto turnStart = std::make_shared<PlayerStartsTurn>();
+		turnStart->player = player;
+		turnStart->questionID = QuestionID::NONE;
+
+		// PlayerStartsTurn is sent before its pause activity is added, so the pause did not record it
+		const auto * turnPause = activities->findActivity<TimerPauseActivity>(player, [](const TimerPauseActivity & pause)
+		{
+			return pause.getActiveQuestionID() != QuestionID::CLIENT && !pause.isFinished();
+		});
+		if(turnPause)
+			turnStart->questionID = turnPause->getActiveQuestionID();
+
+		repeatPack(turnStart);
+	}
+
+	// The battle is already in the gamestate of the client, the interfaces of these players still have to open it
+	for(const auto & battle : gameState().currentBattles)
+	{
+		BattleResumed resumed;
+		resumed.battleID = battle->getBattleID();
+		for(auto side : {BattleSide::ATTACKER, BattleSide::DEFENDER})
+		{
+			if(vstd::contains(players, battle->getSidePlayer(side)))
+				resumed.players.push_back(battle->getSidePlayer(side));
+		}
+
+		if(resumed.players.empty())
+			continue;
+
+		gameServer().sendPack(resumed, connectionID);
+
+		if(battles->getBattleActivity(*battle).result.has_value() || battle->tacticDistance != 0)
+			continue;
+
+		const auto * activeUnit = battle->battleActiveUnit();
+		if(!activeUnit || !vstd::contains(players, battle->battleGetOwner(activeUnit)))
+			continue;
+
+		auto activeStack = std::make_shared<BattleSetActiveStack>();
+		activeStack->battleID = battle->getBattleID();
+		activeStack->stack = activeUnit->unitId();
+		activeStack->reason = BattleUnitTurnReason::TURN_QUEUE;
+		repeatPack(activeStack);
+	}
+
+	// an activity of several players, e.g. a battle result, is on the stack of each of them
+	std::set<const Activity *> repeatedActivities;
+	for(const auto & player : players)
+	{
+		if(!player.isValidPlayer())
+			continue;
+
+		for(const auto & activity : activities->getStack(player))
+		{
+			if(activity->isFinished() || !repeatedActivities.insert(activity.get()).second)
+				continue;
+
+			for(const auto & question : activity->getQuestionPacks())
+				repeatPack(question);
 		}
 	}
 }
@@ -1574,6 +1832,14 @@ void CGameHandler::heroExchange(ObjectInstanceID hero1, ObjectInstanceID hero2)
 
 void CGameHandler::sendAndApply(CPackForClient & pack)
 {
+	// QuestionID::CLIENT is shared by every pause activity, so it does not identify one
+	const auto * question = dynamic_cast<const Question *>(&pack);
+	if(question && question->questionID != QuestionID::NONE && question->questionID != QuestionID::CLIENT)
+	{
+		if(auto activity = activities->getActivity(question->questionID))
+			activity->recordQuestionPack(CMemorySerializer::deepCopyShared<CPackForClient>(pack));
+	}
+
 	gameServer().applyPack(pack);
 }
 
@@ -2240,6 +2506,11 @@ bool CGameHandler::hasPlayerAt(PlayerColor player,  GameConnectionID connectionI
 bool CGameHandler::hasBothPlayersAtSameConnection(PlayerColor left, PlayerColor right) const
 {
 	return gameServer().hasBothPlayersAtSameConnection(left, right);
+}
+
+bool CGameHandler::isPlayerConnected(PlayerColor player) const
+{
+	return gameServer().isPlayerConnected(player);
 }
 
 bool CGameHandler::disbandCreature(ObjectInstanceID id, SlotID pos)

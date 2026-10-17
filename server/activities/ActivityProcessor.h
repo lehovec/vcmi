@@ -124,6 +124,12 @@ public:
 	/// Multi-line dump of every player's stack, for diagnosing a stuck player.
 	std::string describeStacks() const;
 
+	/// Stack of this player, from the bottom to the top
+	const ActivityStack & getStack(PlayerColor player) const
+	{
+		return activities.at(player.getNum());
+	}
+
 	/// The visit this object is currently under, or nullptr. Registered by the visit itself
 	/// when it is added, so a caller never has to search the stacks for it.
 	MapObjectVisitActivity * findVisit(ObjectInstanceID object) const;

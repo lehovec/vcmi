@@ -151,6 +151,7 @@ public:
 	void initMapHandler();
 	void initPlayerEnvironments();
 	void initPlayerInterfaces();
+	void openBattle(const BattleID & battleID, const std::function<bool(PlayerColor)> & opensBattle);
 	std::string aiNameForPlayer(const PlayerSettings & ps, bool battleAI, bool alliedToHuman) const; //empty means no AI -> human
 	std::string aiNameForPlayer(bool battleAI, bool alliedToHuman) const;
 	void installNewPlayerInterface(std::shared_ptr<CGameInterface> gameInterface, PlayerColor color, bool battlecb = false);
@@ -196,6 +197,10 @@ public:
 	std::optional<BattleAction> makeSurrenderRetreatDecision(PlayerColor player, const BattleID & battleID, const BattleStateInfoForRetreat & battleState) override;
 
 	void battleStarted(const BattleID & battle);
+	/// Opens a battle in progress for the interfaces of these players, other interfaces already show it
+	void battleResumed(const BattleID & battle, const std::vector<PlayerColor> & players);
+	/// Creates interfaces of the AI players and the neutral side, after this client became the host during the game
+	void installInterfacesOfNewPlayers();
 	void battleFinished(const BattleID & battleID);
 	void startPlayerBattleAction(const BattleID & battleID, PlayerColor color);
 

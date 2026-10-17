@@ -487,7 +487,16 @@ void ApplyGhNetPackVisitor::visitPlayerMessage(PlayerMessage & pack)
 {
 	if(!pack.player.isSpectator()) // TODO: clearly not a great way to verify permissions
 		gh.throwIfWrongPlayer(connection, &pack, pack.player);
-	
+
+	// handled here and not with the other commands, the answer goes only to this connection
+	if(pack.text == "!notify")
+	{
+		if(!gh.sendNotificationTopics(connection))
+			gh.playerMessages->sendSystemMessage(connection, MetaString::createFromTextID("vcmi.server.notifications.disabled"));
+		result = true;
+		return;
+	}
+
 	gh.playerMessages->playerMessage(pack.player, pack.text, pack.currObj);
 	result = true;
 }

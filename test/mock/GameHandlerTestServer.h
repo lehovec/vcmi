@@ -12,6 +12,7 @@
 #include "../../lib/GameConstants.h"
 
 #include "../../lib/networkPacks/PacksForClient.h"
+#include "../../lib/networkPacks/PacksForClientBattle.h"
 
 #include <memory>
 #include <optional>
@@ -28,8 +29,10 @@ public:
 	void setState(EServerState value) override;
 	EServerState getState() const override;
 	bool isPlayerHost(const PlayerColor & color) const override;
+	bool wasStartedByClient() const override;
 	bool hasPlayerAt(PlayerColor player, GameConnectionID connectionID) const override;
 	bool hasBothPlayersAtSameConnection(PlayerColor left, PlayerColor right) const override;
+	bool isPlayerConnected(PlayerColor player) const override;
 	void applyPack(CPackForClient & pack) override;
 	void sendPack(CPackForClient & pack, GameConnectionID connectionID) override;
 
@@ -44,6 +47,21 @@ public:
 
 	/// Number of battles whose result the server actually applied.
 	int battlesConfirmed = 0;
+
+	/// Packs that the server sent again to a rejoined client, in order.
+	std::vector<std::shared_ptr<CPackForClient>> repeatedPacks;
+
+	/// Battles that the server sent to a rejoined client, with the players that open them, in order.
+	std::vector<BattleResumed> resumedBattles;
+
+	/// Players that the connection of the hosted player controls as well, e.g. AI players of the host.
+	std::vector<PlayerColor> alsoHostedPlayers;
+
+	/// System messages that the server sent to a single connection, in order.
+	std::vector<std::pair<GameConnectionID, MetaString>> sentSystemMessages;
+
+	/// Players whose client is not connected, every other player is.
+	std::vector<PlayerColor> offlinePlayers;
 
 private:
 	EServerState state = EServerState::LOBBY;

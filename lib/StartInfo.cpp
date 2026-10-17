@@ -162,6 +162,10 @@ std::vector<PlayerConnectionID> LobbyInfo::getConnectedPlayerIdsForClient(GameCo
 {
 	std::vector<PlayerConnectionID> ids;
 
+	// offline players keep an invalid connection, a client is never at it
+	if(clientId == GameConnectionID::INVALID)
+		return ids;
+
 	for(const auto & pair : playerNames)
 	{
 		if(pair.second.connection == clientId)

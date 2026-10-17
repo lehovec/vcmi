@@ -30,8 +30,12 @@ public:
 	virtual void setState(EServerState value) = 0;
 	virtual EServerState getState() const = 0;
 	virtual bool isPlayerHost(const PlayerColor & color) const = 0;
+	/// False for a dedicated server, that keeps the game when the host leaves
+	virtual bool wasStartedByClient() const = 0;
 	virtual bool hasPlayerAt(PlayerColor player, GameConnectionID connectionID) const = 0;
 	virtual bool hasBothPlayersAtSameConnection(PlayerColor left, PlayerColor right) const = 0;
+	/// Whether a connected client controls this player
+	virtual bool isPlayerConnected(PlayerColor player) const = 0;
 	virtual void applyPack(CPackForClient & pack) = 0;
 	virtual void sendPack(CPackForClient & pack, GameConnectionID connectionID) = 0;
 };

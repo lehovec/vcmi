@@ -48,8 +48,10 @@ public:
 	void setState(EServerState value) override { state = value; }
 	EServerState getState() const override { return state; }
 	bool isPlayerHost(const PlayerColor &) const override { return true; }
+	bool wasStartedByClient() const override { return true; }
 	bool hasPlayerAt(PlayerColor, GameConnectionID) const override { return true; }
 	bool hasBothPlayersAtSameConnection(PlayerColor, PlayerColor) const override { return true; }
+	bool isPlayerConnected(PlayerColor) const override { return true; }
 	void sendPack(CPackForClient &, GameConnectionID) override {}
 	void applyPack(CPackForClient & pack) override;
 

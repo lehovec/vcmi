@@ -58,6 +58,9 @@ private:
 
 	IGameEngineUser *engineUser = nullptr;
 
+	/// Set by the thread that reports the state of the mobile app
+	std::atomic<bool> appInBackground = false;
+
 	int maxPerformanceOverlayTextWidth = 0;
 
 	/// Longest the display may go unredrawn while the game reports nothing new to show
@@ -81,6 +84,10 @@ public:
 
 	AsyncRunner & async() { return *asyncTasks; }
 	IGameEngineUser & user() { return *engineUser; }
+
+	/// While the mobile app is in the background nothing is drawn, so nothing can be animated
+	bool isAppInBackground() const { return appInBackground; }
+	void setAppInBackground(bool value) { appInBackground = value; }
 	ISoundPlayer & sound() { return *soundPlayerInstance; }
 	IMusicPlayer & music() { return *musicPlayerInstance; }
 	CursorHandler & cursor() { return *cursorHandlerInstance; }

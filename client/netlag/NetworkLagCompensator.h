@@ -33,8 +33,10 @@ class NetworkLagCompensator final : public IGameServer, public INetworkConnectio
 	void setState(EServerState value) override;
 	EServerState getState() const override;
 	bool isPlayerHost(const PlayerColor & color) const override;
+	bool wasStartedByClient() const override;
 	bool hasPlayerAt(PlayerColor player, GameConnectionID connection) const override;
 	bool hasBothPlayersAtSameConnection(PlayerColor left, PlayerColor right) const override;
+	bool isPlayerConnected(PlayerColor player) const override;
 	void applyPack(CPackForClient & pack) override;
 	void sendPack(CPackForClient & pack, GameConnectionID connectionID) override;
 

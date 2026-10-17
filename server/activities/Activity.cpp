@@ -108,7 +108,13 @@ bool Activity::endsByPlayerAnswer() const
 QuestionID Activity::askQuestion()
 {
 	activeQuestionID = ++gh->questionCounter;
+	questionPacks.clear();
 	return activeQuestionID;
+}
+
+void Activity::recordQuestionPack(std::shared_ptr<CPackForClient> pack)
+{
+	questionPacks.push_back(std::move(pack));
 }
 
 void Activity::expectAnswerTo(QuestionID reserved)

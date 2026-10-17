@@ -74,6 +74,7 @@ public:
 	void visitTeleportDialog(TeleportDialog & pack) override;
 	void visitMapObjectSelectDialog(MapObjectSelectDialog & pack) override;
 	void visitBattleStart(BattleStart & pack) override;
+	void visitBattleResumed(BattleResumed & pack) override;
 	void visitBattleNextRound(BattleNextRound & pack) override;
 	void visitBattleSetActiveStack(BattleSetActiveStack & pack) override;
 	void visitBattleLogMessage(BattleLogMessage & pack) override;
@@ -90,6 +91,7 @@ public:
 	void visitEndAction(EndAction & pack) override;
 	void visitPackageApplied(PackageApplied & pack) override;
 	void visitQuestionResolved(QuestionResolved & pack) override;
+	void visitPackRepeatedOnRejoin(PackRepeatedOnRejoin & pack) override;
 	void visitSystemMessage(SystemMessage & pack) override;
 	void visitPlayerBlocked(PlayerBlocked & pack) override;
 	void visitPlayerStartsTurn(PlayerStartsTurn & pack) override;
@@ -119,11 +121,14 @@ public:
 	{
 	}
 
+	void visitPackRepeatedOnRejoin(PackRepeatedOnRejoin & pack) override;
+
 	void visitChangeObjPos(ChangeObjPos & pack) override;
 	void visitRemoveObject(RemoveObject & pack) override;
 	void visitTryMoveHero(TryMoveHero & pack) override;
 	void visitGiveHero(GiveHero & pack) override;
 	void visitBattleStart(BattleStart & pack) override;
+	void visitBattleResumed(BattleResumed & pack) override;
 	void visitBattleNextRound(BattleNextRound & pack) override;
 	void visitBattleUpdateGateState(BattleUpdateGateState & pack) override;
 	void visitBattleResult(BattleResult & pack) override;

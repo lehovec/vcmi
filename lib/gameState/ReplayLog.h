@@ -10,6 +10,7 @@
 #pragma once
 
 #include "../constants/EntityIdentifiers.h"
+#include "../serializer/ESerializationVersion.h"
 
 struct CPack;
 struct CPackForClient;
@@ -21,7 +22,7 @@ class IGameInfoCallback;
 namespace ReplayPackSerializer
 {
 	DLL_LINKAGE std::vector<std::byte> write(const CPackForClient & pack);
-	DLL_LINKAGE std::unique_ptr<CPack> read(const std::vector<std::byte> & data, IGameInfoCallback * cb);
+	DLL_LINKAGE std::unique_ptr<CPack> read(const std::vector<std::byte> & data, IGameInfoCallback * cb, ESerializationVersion version = ESerializationVersion::CURRENT);
 }
 
 /// Marks a single player turn inside a chapter. With simturns those ranges overlap.

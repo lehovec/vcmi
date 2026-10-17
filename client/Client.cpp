@@ -250,16 +250,30 @@ void CClient::initPlayerInterfaces()
 		}
 	}
 
-	if(settings["session"]["spectate"].Bool())
+	if(settings["session"]["spectate"].Bool() && !vstd::contains(playerint, PlayerColor::SPECTATOR))
 	{
 		const PlayerColor spectatorInterfacePlayer = findPlayerColorForSpectatorInterface().value_or(PlayerColor(0));
 		installNewPlayerInterface(std::make_shared<CPlayerInterface>(spectatorInterfacePlayer), PlayerColor::SPECTATOR, true);
 	}
 
-	if(GAME->server().getAllClientPlayers(GAME->server().logicConnection->connectionID).count(PlayerColor::NEUTRAL))
+	if(GAME->server().getAllClientPlayers(GAME->server().logicConnection->connectionID).count(PlayerColor::NEUTRAL) && !vstd::contains(battleints, PlayerColor::NEUTRAL))
 		installNewBattleInterface(AIFactory::createBattleAI(settings["ai"]["combatNeutralAI"].String()), PlayerColor::NEUTRAL);
 
 	logNetwork->trace("Initialized player interfaces %d ms", GAME->server().th->getDiff());
+}
+
+void CClient::installInterfacesOfNewPlayers()
+{
+	for(const auto & color : GAME->server().getAllClientPlayers(GAME->server().logicConnection->connectionID))
+	{
+		if(vstd::contains(playerEnvironments, color) || (color.isValidPlayer() && !gameState().players.count(color)))
+			continue;
+
+		logNetwork->info("Preparing environment for player %s", color.toString());
+		playerEnvironments[color] = std::make_shared<CPlayerEnvironment>(color, this, std::make_shared<CCallback>(gamestate, color, this));
+	}
+
+	initPlayerInterfaces();
 }
 
 std::optional<PlayerColor> CClient::findPlayerColorForSpectatorInterface() const
@@ -530,6 +544,16 @@ int CClient::sendRequest(const CPackForServer & request, PlayerColor player, boo
 
 void CClient::battleStarted(const BattleID & battleID)
 {
+	openBattle(battleID, [](PlayerColor) { return true; });
+}
+
+void CClient::battleResumed(const BattleID & battleID, const std::vector<PlayerColor> & players)
+{
+	openBattle(battleID, [&players](PlayerColor color) { return vstd::contains(players, color); });
+}
+
+void CClient::openBattle(const BattleID & battleID, const std::function<bool(PlayerColor)> & opensBattle)
+{
 	const BattleInfo * info = gameState().getBattle(battleID);
 
 	std::shared_ptr<CPlayerInterface> att;
@@ -539,14 +563,14 @@ void CClient::battleStarted(const BattleID & battleID)
 
 	for(auto & battleCb : battleCallbacks)
 	{
-		if(!battleCb.first.isValidPlayer() || battleCb.first == leftSide.color || battleCb.first == rightSide.color)
+		if((!battleCb.first.isValidPlayer() || battleCb.first == leftSide.color || battleCb.first == rightSide.color) && opensBattle(battleCb.first))
 			battleCb.second->onBattleStarted(info);
 	}
 
 	//If quick combat is not, do not prepare interfaces for battleint
 	auto callBattleStart = [&](PlayerColor color, BattleSide side)
 	{
-		if(vstd::contains(battleints, color))
+		if(opensBattle(color) && vstd::contains(battleints, color))
 			battleints[color]->battleStart(info->battleID, leftSide.getArmy(), rightSide.getArmy(), info->tile, leftSide.getHero(), rightSide.getHero(), side, info->replayAllowed);
 	};
 	
@@ -556,10 +580,10 @@ void CClient::battleStarted(const BattleID & battleID)
 	if(settings["session"]["spectate"].Bool() && !settings["session"]["spectate-skip-battle"].Bool())
 		callBattleStart(PlayerColor::SPECTATOR, BattleSide::RIGHT_SIDE);
 	
-	if(vstd::contains(playerint, leftSide.color) && playerint[leftSide.color]->human)
+	if(opensBattle(leftSide.color) && vstd::contains(playerint, leftSide.color) && playerint[leftSide.color]->human)
 		att = std::dynamic_pointer_cast<CPlayerInterface>(playerint[leftSide.color]);
 
-	if(vstd::contains(playerint, rightSide.color) && playerint[rightSide.color]->human)
+	if(opensBattle(rightSide.color) && vstd::contains(playerint, rightSide.color) && playerint[rightSide.color]->human)
 		def = std::dynamic_pointer_cast<CPlayerInterface>(playerint[rightSide.color]);
 	
 	//Remove player interfaces for auto battle (quickCombat option)
@@ -594,7 +618,7 @@ void CClient::battleStarted(const BattleID & battleID)
 		{
 			CPlayerInterface::battleInt = std::make_shared<BattleInterface>(info->getBattleID(), leftSide.getArmy(), rightSide.getArmy(), leftSide.getHero(), rightSide.getHero(), att, def);
 		}
-		else if(settings["session"]["spectate"].Bool() && !settings["session"]["spectate-skip-battle"].Bool())
+		else if(opensBattle(PlayerColor::SPECTATOR) && settings["session"]["spectate"].Bool() && !settings["session"]["spectate-skip-battle"].Bool())
 		{
 			//TODO: This certainly need improvement
 			auto spectratorInt = std::dynamic_pointer_cast<CPlayerInterface>(playerint[PlayerColor::SPECTATOR]);
@@ -616,7 +640,7 @@ void CClient::battleStarted(const BattleID & battleID)
 	{
 		auto tacticianColor = info->getSide(info->tacticsSide).color;
 
-		if (vstd::contains(battleints, tacticianColor))
+		if (opensBattle(tacticianColor) && vstd::contains(battleints, tacticianColor))
 			battleints[tacticianColor]->yourTacticPhase(info->battleID, info->tacticDistance);
 	}
 }

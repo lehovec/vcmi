@@ -13,6 +13,7 @@
 #include <boost/container/small_vector.hpp>
 
 struct CPackForServer;
+struct CPackForClient;
 class JsonNode;
 class CGObjectInstance;
 class IObjectInterface;
@@ -163,6 +164,14 @@ public:
 	/// allocated one. Used for unpausing, which the client reports with a fixed id.
 	void expectAnswerTo(QuestionID reserved);
 
+	/// Keeps a copy of a pack that asked the active question, to send it again to a player that rejoins
+	void recordQuestionPack(std::shared_ptr<CPackForClient> pack);
+	/// Packs that asked the active question
+	const std::vector<std::shared_ptr<CPackForClient>> & getQuestionPacks() const
+	{
+		return questionPacks;
+	}
+
 	virtual ~Activity();
 protected:
 	explicit Activity(CGameHandler * gh, ActivityType type);
@@ -181,6 +190,8 @@ private:
 	ActivityType type = ActivityType::Unknown;
 	std::optional<PlayerColor> answeredBy;
 	bool finished = false;
+
+	std::vector<std::shared_ptr<CPackForClient>> questionPacks;
 
 protected:
 	QuestionID activeQuestionID = QuestionID::NONE; ///< the last question asked, kept after the answer to recognize late replies

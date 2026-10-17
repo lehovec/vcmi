@@ -164,6 +164,12 @@ bool NetworkLagCompensator::isPlayerHost(const PlayerColor & color) const
 	return false; // TODO?
 }
 
+bool NetworkLagCompensator::wasStartedByClient() const
+{
+	// a prediction must not save the game
+	return true;
+}
+
 bool NetworkLagCompensator::hasPlayerAt(PlayerColor player, GameConnectionID c) const
 {
 	return true; // TODO?
@@ -172,6 +178,11 @@ bool NetworkLagCompensator::hasPlayerAt(PlayerColor player, GameConnectionID c) 
 bool NetworkLagCompensator::hasBothPlayersAtSameConnection(PlayerColor left, PlayerColor right) const
 {
 	return false; // TODO?
+}
+
+bool NetworkLagCompensator::isPlayerConnected(PlayerColor player) const
+{
+	return true; // only a connected client makes predictions
 }
 
 void NetworkLagCompensator::applyPack(CPackForClient & pack)

@@ -157,6 +157,13 @@ MapViewController::MapViewController(std::shared_ptr<MapViewModel> model, std::s
 	context = adventureContext;
 }
 
+MapViewController::~MapViewController()
+{
+	// The view is replaced e.g. on screen resize. A netpack that waits for its animation goes on
+	// with the new view, terminating the wait would end the network thread.
+	animationWait.releaseWaiters();
+}
+
 std::shared_ptr<IMapRendererContext> MapViewController::getContext() const
 {
 	return context;
@@ -312,6 +319,10 @@ bool MapViewController::isEventVisible(const CGObjectInstance * obj, const Playe
 	if(adventureContext == nullptr)
 		return false;
 
+	// nothing is drawn in the background, a netpack would wait for an animation that does not progress
+	if(ENGINE->isAppInBackground())
+		return false;
+
 	const auto replayed = replayFollowedPlayer();
 	const PlayerColor followed = replayed.value_or(GAME->interface()->playerID);
 
@@ -341,6 +352,10 @@ bool MapViewController::isEventVisible(const CGObjectInstance * obj, const Playe
 bool MapViewController::isEventVisible(const CGHeroInstance * obj, const int3 & from, const int3 & dest)
 {
 	if(adventureContext == nullptr)
+		return false;
+
+	// nothing is drawn in the background, a netpack would wait for an animation that does not progress
+	if(ENGINE->isAppInBackground())
 		return false;
 
 	const auto replayed = replayFollowedPlayer();
@@ -627,7 +642,25 @@ bool MapViewController::hasOngoingAnimations()
 void MapViewController::waitForOngoingAnimations()
 {
 	auto unlockInterface = vstd::makeUnlockGuard(ENGINE->interfaceMutex);
-	animationWait.waitWhileBusy();
+	animationWait.waitWhileBusyUnless(std::chrono::milliseconds(100), [](){ return ENGINE->isAppInBackground(); });
+}
+
+void MapViewController::finishOngoingAnimations()
+{
+	if(movementContext)
+		movementContext->progress = 1.0;
+	if(teleportContext)
+		teleportContext->progress = 1.0;
+	if(fadingOutContext)
+		fadingOutContext->progress = 0.0;
+	if(fadingInContext)
+		fadingInContext->progress = 1.0;
+
+	afterRender();
+
+	// every animation ends in afterRender(), the waiting netpack would never go on otherwise
+	if(animationWait.isBusy())
+		throw std::runtime_error("Map view is busy without an animation in progress");
 }
 
 void MapViewController::endNetwork()

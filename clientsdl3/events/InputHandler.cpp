@@ -37,6 +37,19 @@
 #include <SDL3/SDL_clipboard.h>
 #include <SDL3/SDL_power.h>
 
+// app events reach the event queue only once the app is resumed, a watch sees them right away
+static bool SDLCALL watchAppState(void *, SDL_Event * event)
+{
+	if(!ENGINE)
+		return true;
+
+	if(event->type == SDL_EVENT_WILL_ENTER_BACKGROUND)
+		ENGINE->setAppInBackground(true);
+	else if(event->type == SDL_EVENT_DID_ENTER_FOREGROUND)
+		ENGINE->setAppInBackground(false);
+	return true;
+}
+
 InputHandler::InputHandler()
 	: enableMouse(settings["input"]["enableMouse"].Bool())
 	, enableTouch(settings["input"]["enableTouch"].Bool())
@@ -52,9 +65,13 @@ InputHandler::InputHandler()
 	, cachedPowerStatePercent(-1)
 	, powerStateFrameCounter(0)
 {
+	SDL_AddEventWatch(watchAppState, nullptr);
 }
 
-InputHandler::~InputHandler() = default;
+InputHandler::~InputHandler()
+{
+	SDL_RemoveEventWatch(watchAppState, nullptr);
+}
 
 void InputHandler::handleCurrentEvent(const SDL_Event & current)
 {

@@ -92,6 +92,16 @@ void SimturnsContactStatus::visitTyped(ICPackVisitor & visitor)
 	visitor.visitSimturnsContactStatus(*this);
 }
 
+void PackRepeatedOnRejoin::visitTyped(ICPackVisitor & visitor)
+{
+	visitor.visitPackRepeatedOnRejoin(*this);
+}
+
+void BattleResumed::visitTyped(ICPackVisitor & visitor)
+{
+	visitor.visitBattleResumed(*this);
+}
+
 void PlayerBlocked::visitTyped(ICPackVisitor & visitor)
 {
 	visitor.visitPlayerBlocked(*this);
@@ -749,6 +759,11 @@ void CenterView::visitTyped(ICPackVisitor & visitor)
 void LobbyClientConnected::visitTyped(ICPackVisitor & visitor)
 {
 	visitor.visitLobbyClientConnected(*this);
+}
+
+void LobbyRejoinGame::visitTyped(ICPackVisitor & visitor)
+{
+	visitor.visitLobbyRejoinGame(*this);
 }
 
 void LobbyClientDisconnected::visitTyped(ICPackVisitor & visitor)

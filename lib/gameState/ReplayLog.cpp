@@ -24,9 +24,10 @@ std::vector<std::byte> ReplayPackSerializer::write(const CPackForClient & pack)
 	return serializer.extractBuffer();
 }
 
-std::unique_ptr<CPack> ReplayPackSerializer::read(const std::vector<std::byte> & data, IGameInfoCallback * cb)
+std::unique_ptr<CPack> ReplayPackSerializer::read(const std::vector<std::byte> & data, IGameInfoCallback * cb, ESerializationVersion version)
 {
 	CMemorySerializer serializer(data);
+	serializer.iser.version = version;
 	serializer.iser.cb = cb;
 
 	std::unique_ptr<CPack> result;

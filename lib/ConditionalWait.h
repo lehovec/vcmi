@@ -105,10 +105,37 @@ public:
 		waitersExited.wait(un, [this]{ return activeWaiters == 0; });
 	}
 
+	/// Ends the wait of every waiter as if the owner became free, and returns once all of them left their wait
+	void releaseWaiters()
+	{
+		std::unique_lock un(mx);
+		isBusyValue = false;
+		cond.notify_all();
+		waitersExited.wait(un, [this]{ return activeWaiters == 0; });
+	}
+
 	bool isBusy()
 	{
 		std::unique_lock lock(mx);
 		return isBusyValue;
+	}
+
+	/// Waits like waitWhileBusy(), but also returns once the condition, checked at each interval, is true
+	template<typename Condition>
+	void waitWhileBusyUnless(std::chrono::milliseconds interval, Condition condition)
+	{
+		std::unique_lock un(mx);
+		++activeWaiters;
+		while(!cond.wait_for(un, interval, [this](){ return !isBusyValue;}) && !condition())
+		{
+		}
+
+		const bool terminate = isTerminating;
+		if (--activeWaiters == 0)
+			waitersExited.notify_all();
+
+		if (terminate)
+			throw TerminationRequestedException();
 	}
 
 	void waitWhileBusy()

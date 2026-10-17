@@ -9,6 +9,7 @@
  */
 #pragma once
 
+#include "HumanTurnStart.h"
 #include "IGameServer.h"
 
 #include "../lib/network/NetworkInterface.h"
@@ -17,6 +18,7 @@
 class CMapInfo;
 
 struct CPackForLobby;
+struct LobbyClientConnected;
 
 class GameConnection;
 struct StartInfo;
@@ -46,6 +48,25 @@ class CVCMIServer : public LobbyInfo, public INetworkServerListener, public INet
 
 	std::shared_ptr<GameConnection> findConnection(const std::shared_ptr<INetworkConnection> &);
 
+	/// Seats that a rejoining client takes, and the connections that hold some of them although the client left
+	struct RejoinSeats
+	{
+		std::vector<PlayerConnectionID> players;
+		std::vector<std::shared_ptr<GameConnection>> staleConnections;
+	};
+
+	/// Seats with these names that still have a color in game, see chooseRejoinSeats
+	RejoinSeats findPlayersToRejoin(const std::vector<std::string> & names, const std::string & deviceId) const;
+	/// Device each player joined from, a player of an older client or of a restarted server has none
+	std::map<PlayerConnectionID, std::string> playerDevices;
+	/// Removes players that left during gameplay, their seats are no longer reserved
+	void dropOfflinePlayers();
+
+	bool isHostConnected() const;
+	void announceHostChange();
+	/// Makes another connected client the host after the host left a game on a dedicated server
+	void passHostToConnectedClient();
+
 	GameConnectionID currentClientId;
 	PlayerConnectionID currentPlayerId;
 	uint16_t port;
@@ -55,6 +76,21 @@ class CVCMIServer : public LobbyInfo, public INetworkServerListener, public INet
 
 	bool loadSavedGame(CGameHandler & handler, const StartInfo & info);
 public:
+	/// A seat in game that a rejoining client may take
+	struct RejoinCandidate
+	{
+		PlayerConnectionID playerId;
+		std::string name;
+		std::string deviceId; ///< empty if the device is not known
+		bool online = false; ///< a connection holds the seat
+		bool replaceable = false; ///< an online seat whose connection may be closed for a new one of the same device
+	};
+
+	/// Seats that a client of this device takes for its names. A seat of the device is preferred, also an online one,
+	/// because a connection that the client left stays open until a network timeout. With several seats of one name,
+	/// a seat of another known device is never taken
+	static std::vector<PlayerConnectionID> chooseRejoinSeats(const std::vector<RejoinCandidate> & seats, const std::vector<std::string> & names, const std::string & deviceId);
+
 	uint16_t getPort() const override
 	{
 		return port;
@@ -68,11 +104,14 @@ public:
 	bool isPlayerHost(const PlayerColor & color) const override;
 	bool hasPlayerAt(PlayerColor player, GameConnectionID connectionID) const override;
 	bool hasBothPlayersAtSameConnection(PlayerColor left, PlayerColor right) const override;
+	bool isPlayerConnected(PlayerColor player) const override;
 	void applyPack(CPackForClient & pack) override;
 	void sendPack(CPackForClient & pack, GameConnectionID connectionID) override;
 
 	/// List of all active connections
 	std::vector<std::shared_ptr<GameConnection>> activeConnections;
+	/// Connections opened during gameplay, that have not rejoined the game
+	std::vector<std::shared_ptr<GameConnection>> pendingConnections;
 
 	uint16_t prepare(bool connectToLobby, bool listenForConnections);
 
@@ -83,13 +122,21 @@ public:
 	void onTimer() override;
 
 	std::shared_ptr<CGameHandler> gh;
+	/// Passed to the game handler of every game that this server starts
+	HumanTurnStartListener humanTurnStartListener;
+	/// Passed to the game handler of every game, see CGameHandler::notificationSecret
+	std::string notificationSecret;
 
 	CVCMIServer(uint16_t port, bool runByClient);
 	~CVCMIServer();
 
 	void run();
 
-	bool wasStartedByClient() const;
+	bool wasStartedByClient() const override;
+	/// Loads the newest autosave, every human player has to rejoin it. Returns false if there is no autosave.
+	bool resumeNewestAutosave();
+	/// Connection that was opened during gameplay and has not rejoined the game
+	bool isPendingConnection(const std::shared_ptr<GameConnection> & connection) const;
 	bool prepareToStartGame();
 	void prepareToRestart();
 	void startGameImmediately();
@@ -108,6 +155,8 @@ public:
 
 	void clientConnected(std::shared_ptr<GameConnection> c, const std::vector<std::string> & names, const std::string & uuid, EStartMode mode);
 	void clientDisconnected(std::shared_ptr<GameConnection> c);
+	/// Gives the seats of offline players named in the pack to a connection opened during gameplay
+	void clientRejoining(std::shared_ptr<GameConnection> c, LobbyClientConnected & pack);
 
 	void announceMessage(const MetaString & txt);
 	void announceMessage(const std::string & txt);

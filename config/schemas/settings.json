@@ -597,7 +597,7 @@
 			"type" : "object",
 			"additionalProperties" : false,
 			"default" : {},
-			"required" : [ "localHostname", "localPort", "remoteHostname", "remotePort", "seed", "replayRoundsKept"],
+			"required" : [ "localHostname", "localPort", "remoteHostname", "remotePort", "seed", "replayRoundsKept", "deviceId"],
 			"properties" : {
 				"localHostname" : {
 					"type" : "string",
@@ -623,6 +623,11 @@
 				"replayRoundsKept" : {
 					"type" : "number",
 					"default" : 1
+				},
+				// generated on first start, identifies this installation to a server when it rejoins a game
+				"deviceId" : {
+					"type" : "string",
+					"default" : ""
 				}
 			}
 		},

@@ -215,7 +215,7 @@ public:
 
 	/// Replaces contents of this gamestate with a snapshot made by saveToMemory().
 	/// Identity of this object is preserved, so all shared_ptr's to it stay valid.
-	void loadFromMemory(std::vector<std::byte> data);
+	void loadFromMemory(std::vector<std::byte> data, ESerializationVersion version = ESerializationVersion::CURRENT);
 
 	template <typename Handler> void serialize(Handler &h)
 	{

@@ -65,12 +65,13 @@ enum class ESerializationVersion : int32_t
 	CREATURE_REFUSED_JOINING_REMOVED, // wandering creatures no longer store a refused offer to join, the visit tracks it
 	HOTA_HERO_LEVEL_OPTIONS, // persist HotA per-hero experience lock
 	BOAT_LAST_HERO, // boat remembers the last hero that used it, so Summon Boat can prefer boat of the caster
+	PLAYER_REJOIN, // player that left a multiplayer game can rejoin it, server repeats unanswered questions to the client
 
 	RELEASE_170 = HOTA_MAP_STACK_COUNT,
 	RELEASE_174 = CUSTOM_GARRISON_TITLE,
 
 	MINIMAL = RELEASE_170,
-	CURRENT = BOAT_LAST_HERO,
+	CURRENT = PLAYER_REJOIN,
 };
 
 static_assert(ESerializationVersion::MINIMAL <= ESerializationVersion::CURRENT, "Invalid serialization version definition!");

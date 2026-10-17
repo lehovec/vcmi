@@ -31,8 +31,10 @@ public:
 	MOCK_METHOD(void, setState, (EServerState value), (override));
 	MOCK_METHOD(EServerState, getState, (), (const, override));
 	MOCK_METHOD(bool, isPlayerHost, (const PlayerColor & color), (const, override));
+	MOCK_METHOD(bool, wasStartedByClient, (), (const, override));
 	MOCK_METHOD(bool, hasPlayerAt, (PlayerColor player, GameConnectionID connectionID), (const, override));
 	MOCK_METHOD(bool, hasBothPlayersAtSameConnection, (PlayerColor left, PlayerColor right), (const, override));
+	MOCK_METHOD(bool, isPlayerConnected, (PlayerColor player), (const, override));
 	MOCK_METHOD(void, applyPack, (CPackForClient & pack), (override));
 	MOCK_METHOD(void, sendPack, (CPackForClient & pack, GameConnectionID connectionID), (override));
 };

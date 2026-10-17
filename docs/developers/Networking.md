@@ -27,6 +27,22 @@ Following connections can be established during game lifetime:
 
 For gameplay, VCMI serializes data into a binary stream. See [Serialization](Serialization.md) for more information.
 
+### Rejoining a game in progress
+
+A player whose client leaves a multiplayer game keeps their seat; their turns and battles wait for them. A turn timer keeps running for an offline player. A client that connects during gameplay sends `LobbyClientConnected` as usual and receives the seats of offline players with the same names. The `uuid` of the pack starts with a device id that the client keeps in its settings. A seat of the same device is preferred: when several players share a name, a client of another device takes none of their seats. A seat of the same device is taken back also while its old connection is still open, because a connection that dropped without closing stays open until a network timeout. The client receives:
+
+- `LobbyRejoinGame` instead of `LobbyStartGame`. A serialized gamestate does not contain battles, so during a battle it holds the gamestate the day started from and every pack applied since.
+- `PackRepeatedOnRejoin` for every question that the player has not answered yet, and for the start of their turn. The client only notifies its interfaces, the gamestate already contains their effects.
+- `BattleResumed` for every battle of the player, followed by the unit that waits for orders.
+
+The host client controls the AI players and the neutral side. A server started by a client stops when the host leaves. A dedicated server, started as `vcmiserver` on its own, keeps the game while a human player is still in it:
+
+- When the host leaves, another connected client becomes the host. It receives `LobbyUpdateState`, creates the interfaces of the AI players, and then the same repeated packs as a rejoining client, for the AI players and the neutral side only.
+- When no client is connected, the game waits. The first client that rejoins becomes the host.
+- The server stops when the last human player won or lost and the host leaves, or when the host sends the `!exit` chat command.
+- Started with `--on-turn-start <command>`, a dedicated server runs the command when the turn of a human player starts, also when it is resumed from a save. Its arguments are the player name, the player color, the day since the game start, `online` or `offline`, and the notification topic of the player, e.g. `vcmi-k7q2`. The topic is derived from a secret that the server keeps in `notification-secret.txt` in its configuration directory, from the start time of the game and from the player color, so it stays the same after a restart. A client receives the topics of its players as a system message when the game starts or when it rejoins, and again on the `!notify` chat command. A command without a directory is searched in `PATH`, a relative path is relative to the directory the server was started in.
+- Before the turn of a human player starts, a dedicated server saves the game as an autosave, unless a battle is in progress. Started with `--resume`, it loads the newest autosave in the saves directory instead of opening the lobby, and exits if loading fails. Every human player is offline then, and rejoins the game under the same name.
+
 ## Global lobby communication
 
 For implementation details see:

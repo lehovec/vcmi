@@ -31,6 +31,8 @@ public:
 	virtual void visitPackageReceived(PackageReceived & pack) {}
 	virtual void visitSystemMessage(SystemMessage & pack) {}
 	virtual void visitSimturnsContactStatus(SimturnsContactStatus & pack) {}
+	virtual void visitPackRepeatedOnRejoin(PackRepeatedOnRejoin & pack) {}
+	virtual void visitBattleResumed(BattleResumed & pack) {}
 	virtual void visitPlayerBlocked(PlayerBlocked & pack) {}
 	virtual void visitPlayerCheated(PlayerCheated & pack) {}
 	virtual void visitPlayerStartsTurn(PlayerStartsTurn & pack) {}
@@ -167,6 +169,7 @@ public:
 	virtual	void visitLobbyQuickLoadGame(LobbyQuickLoadGame & pack) {}
 	virtual void visitLobbyClientConnected(LobbyClientConnected & pack) {}
 	virtual void visitLobbyClientDisconnected(LobbyClientDisconnected & pack) {}
+	virtual void visitLobbyRejoinGame(LobbyRejoinGame & pack) {}
 	virtual void visitLobbyChatMessage(LobbyChatMessage & pack) {}
 	virtual void visitLobbyGuiAction(LobbyGuiAction & pack) {}
 	virtual void visitLobbyLoadProgress(LobbyLoadProgress & pack) {}

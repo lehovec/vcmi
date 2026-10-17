@@ -40,14 +40,24 @@ bool GameHandlerTestServer::isPlayerHost(const PlayerColor & color) const
 	return hostedPlayer == color;
 }
 
+bool GameHandlerTestServer::wasStartedByClient() const
+{
+	return true;
+}
+
 bool GameHandlerTestServer::hasPlayerAt(PlayerColor player, GameConnectionID connectionID) const
 {
-	return hostedPlayer == player && connectionID == GameConnectionID::FIRST_CONNECTION;
+	return (hostedPlayer == player || vstd::contains(alsoHostedPlayers, player)) && connectionID == GameConnectionID::FIRST_CONNECTION;
 }
 
 bool GameHandlerTestServer::hasBothPlayersAtSameConnection(PlayerColor, PlayerColor) const
 {
 	return false;
+}
+
+bool GameHandlerTestServer::isPlayerConnected(PlayerColor player) const
+{
+	return !vstd::contains(offlinePlayers, player);
 }
 
 void GameHandlerTestServer::applyPack(CPackForClient & pack)
@@ -76,7 +86,15 @@ void GameHandlerTestServer::applyPack(CPackForClient & pack)
 		gameState->apply(pack);
 }
 
-void GameHandlerTestServer::sendPack(CPackForClient &, GameConnectionID)
+void GameHandlerTestServer::sendPack(CPackForClient & pack, GameConnectionID connectionID)
 {
 	// Test state changes are applied through applyPack.
+	if(const auto * message = dynamic_cast<const SystemMessage *>(&pack))
+		sentSystemMessages.emplace_back(connectionID, message->text);
+
+	if(const auto * repeated = dynamic_cast<const PackRepeatedOnRejoin *>(&pack))
+		repeatedPacks.push_back(repeated->pack);
+
+	if(const auto * resumed = dynamic_cast<const BattleResumed *>(&pack))
+		resumedBattles.push_back(*resumed);
 }

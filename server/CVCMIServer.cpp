@@ -23,6 +23,8 @@
 #include "../lib/entities/hero/CHeroClass.h"
 #include "../lib/entities/ResourceTypeHandler.h"
 #include "../lib/gameState/CGameState.h"
+#include "../lib/filesystem/Filesystem.h"
+#include "../lib/filesystem/SavegamePath.h"
 #include "../lib/mapping/CMapInfo.h"
 #include "../lib/texts/CompositeTranslator.h"
 #include "../lib/mapping/CMapHeader.h"
@@ -74,6 +76,20 @@ public:
 	{
 	}
 };
+
+namespace
+{
+
+/// Persistent device id that a client puts in front of its uuid, empty for an older client
+std::string deviceIdOf(const std::string & clientUuid)
+{
+	const auto separator = clientUuid.find(LobbyClientConnected::DEVICE_ID_SEPARATOR);
+	if(separator == std::string::npos)
+		return {};
+	return clientUuid.substr(0, separator);
+}
+
+}
 
 CVCMIServer::CVCMIServer(uint16_t port, bool runByClient)
 	: currentClientId(GameConnectionID::FIRST_CONNECTION)
@@ -131,9 +147,13 @@ void CVCMIServer::onNewConnection(const std::shared_ptr<INetworkConnection> & co
 		activeConnections.push_back(std::make_shared<GameConnection>(connection));
 		activeConnections.back()->enterLobbyConnectionMode();
 	}
+	else if(getState() == EServerState::GAMEPLAY)
+	{
+		pendingConnections.push_back(std::make_shared<GameConnection>(connection));
+		pendingConnections.back()->enterLobbyConnectionMode();
+	}
 	else
 	{
-		// TODO: reconnection support
 		connection->close();
 	}
 }
@@ -145,6 +165,14 @@ void CVCMIServer::onPacketReceived(const std::shared_ptr<INetworkConnection> & c
 		throw std::out_of_range("Unknown connection received in CVCMIServer::findConnection");
 
 	auto pack = c->retrievePack(message);
+
+	if(isPendingConnection(c) && dynamic_cast<CPackForLobby *>(pack.get()) == nullptr)
+	{
+		const CPack & receivedPack = *pack;
+		logNetwork->error("Received game pack %s from connection that has not rejoined the game", typeid(receivedPack).name());
+		return;
+	}
+
 	CVCMIServerPackVisitor visitor(*this, this->gh, c);
 	pack->visit(visitor);
 }
@@ -202,7 +230,18 @@ std::shared_ptr<GameConnection> CVCMIServer::findConnection(const std::shared_pt
 			return gameConnection;
 	}
 
+	for(const auto & gameConnection : pendingConnections)
+	{
+		if (gameConnection->isMyConnection(netConnection))
+			return gameConnection;
+	}
+
 	return nullptr;
+}
+
+bool CVCMIServer::isPendingConnection(const std::shared_ptr<GameConnection> & connection) const
+{
+	return vstd::contains(pendingConnections, connection);
 }
 
 bool CVCMIServer::wasStartedByClient() const
@@ -257,7 +296,33 @@ void CVCMIServer::prepareToRestart()
 	for(auto activeConnection : activeConnections)
 		activeConnection->enterLobbyConnectionMode();
 
+	dropOfflinePlayers();
+
 	gh = nullptr;
+}
+
+void CVCMIServer::dropOfflinePlayers()
+{
+	for(auto it = playerNames.begin(); it != playerNames.end();)
+	{
+		if(it->second.connection != GameConnectionID::INVALID)
+		{
+			++it;
+			continue;
+		}
+
+		for(auto & playerInfo : si->playerInfos)
+			playerInfo.second.connectedPlayerIDs.erase(it->first);
+
+		it = playerNames.erase(it);
+	}
+
+	for(const auto & connection : pendingConnections)
+	{
+		if(auto networkConnection = connection->getConnection())
+			networkConnection->close();
+	}
+	pendingConnections.clear();
 }
 
 bool CVCMIServer::prepareToStartGame()
@@ -373,6 +438,8 @@ bool CVCMIServer::prepareToStartGame()
 	}
 
 	gh = std::move(newGH);
+	gh->humanTurnStartListener = humanTurnStartListener;
+	gh->notificationSecret = notificationSecret;
 
 	if(lobbyProcessor)
 		lobbyProcessor->sendGameStarted();
@@ -402,6 +469,9 @@ void CVCMIServer::startGameImmediately()
 	onTimer();
 
 	multiplayerWelcomeMessage();
+
+	for(const auto & connection : activeConnections)
+		gh->sendNotificationTopics(connection->connectionID);
 }
 
 void CVCMIServer::onDisconnected(const std::shared_ptr<INetworkConnection> & connection, const std::string & errorMessage)
@@ -421,6 +491,16 @@ void CVCMIServer::onDisconnected(const std::shared_ptr<INetworkConnection> & con
 
 void CVCMIServer::handleReceivedPack(std::shared_ptr<GameConnection> connection, CPackForLobby & pack)
 {
+	// a connection that has not rejoined the game can only query the server, join or leave
+	if(isPendingConnection(connection)
+		&& dynamic_cast<LobbyClientConnected *>(&pack) == nullptr
+		&& dynamic_cast<LobbyQueryState *>(&pack) == nullptr
+		&& dynamic_cast<LobbyClientDisconnected *>(&pack) == nullptr)
+	{
+		logNetwork->error("Received lobby pack %s from connection that has not rejoined the game", typeid(pack).name());
+		return;
+	}
+
 	ClientPermissionsCheckerNetPackVisitor checker(*this, connection);
 	pack.visit(checker);
 
@@ -521,6 +601,8 @@ void CVCMIServer::clientConnected(std::shared_ptr<GameConnection> c, const std::
 		cp.connection = c->connectionID;
 		cp.name = name;
 		playerNames.try_emplace(id, cp);
+		if(!deviceIdOf(uuid).empty())
+			playerDevices[id] = deviceIdOf(uuid);
 		logNetwork->info("Player joined lobby: name='%s', playerId=%d, connectionId=%d", name, static_cast<int>(id), static_cast<int>(c->connectionID));
 		MetaString joinMessage;
 		joinMessage.appendTextID("vcmi.lobby.system.playerJoined");
@@ -541,9 +623,22 @@ void CVCMIServer::clientConnected(std::shared_ptr<GameConnection> c, const std::
 
 void CVCMIServer::clientDisconnected(std::shared_ptr<GameConnection> connection)
 {
+	if(isPendingConnection(connection))
+	{
+		vstd::erase(pendingConnections, connection);
+		return;
+	}
+
 	assert(vstd::contains(activeConnections, connection));
 	logGlobal->trace("Received disconnection request");
 	vstd::erase(activeConnections, connection);
+
+	// e.g. a lobby preview, that only queried the server state. Its id is the same as the id of a host that did not connect yet
+	if(connection->connectionID == GameConnectionID::INVALID)
+	{
+		logNetwork->info("Connection that did not join the lobby has been closed");
+		return;
+	}
 
 	std::vector<PlayerConnectionID> disconnectedPlayerIds;
 	for(const auto & playerEntry : playerNames)
@@ -562,7 +657,11 @@ void CVCMIServer::clientDisconnected(std::shared_ptr<GameConnection> connection)
 	if(disconnectedPlayerIds.empty())
 		logNetwork->info("Connection %d disconnected from lobby with no mapped player names", static_cast<int>(connection->connectionID));
 
-	if(activeConnections.empty() || hostClientId == connection->connectionID)
+	const bool hostLeft = hostClientId == connection->connectionID;
+	const bool gameContinues = gh && getState() == EServerState::GAMEPLAY && gh->hasHumanPlayerInGame();
+
+	// a server started by a client stops together with it, a dedicated server keeps the game going for the players that left
+	if((activeConnections.empty() || hostLeft) && (wasStartedByClient() || !gameContinues))
 	{
 		setState(EServerState::SHUTDOWN);
 		return;
@@ -571,6 +670,14 @@ void CVCMIServer::clientDisconnected(std::shared_ptr<GameConnection> connection)
 	if(gh && getState() == EServerState::GAMEPLAY)
 	{
 		gh->handleClientDisconnection(connection->connectionID, disconnectedPlayerIds);
+
+		// the seats stay reserved, so that the players can rejoin the game
+		for(const auto & playerId : disconnectedPlayerIds)
+			playerNames.at(playerId).connection = GameConnectionID::INVALID;
+
+		if(hostLeft)
+			passHostToConnectedClient();
+		return;
 	}
 
 	for(const auto & playerId : disconnectedPlayerIds)
@@ -582,6 +689,286 @@ void CVCMIServer::clientDisconnected(std::shared_ptr<GameConnection> connection)
 		for(const auto & playerId : disconnectedPlayerIds)
 			connectedPlayerIDs.erase(playerId);
 	}
+}
+
+bool CVCMIServer::resumeNewestAutosave()
+{
+	assert(getState() == EServerState::LOBBY);
+
+	auto * filesystem = CResourceHandler::get("local");
+	filesystem->updateFilteredFiles([](const std::string & mount)
+	{
+		return boost::algorithm::starts_with(mount, "SAVES/");
+	});
+
+	std::optional<ResourcePath> newestAutosave;
+	std::time_t newestWriteTime = 0;
+	for(const auto & resource : filesystem->getFilteredFiles([](const ResourcePath & resource)
+		{
+			return resource.getType() == EResType::SAVEGAME && SavegamePath::isAutosaveName(resource.getOriginalName());
+		}))
+	{
+		const auto writeTime = filesystem->getLastWriteTime(resource);
+		if(!newestAutosave || writeTime > newestWriteTime)
+		{
+			newestAutosave = resource;
+			newestWriteTime = writeTime;
+		}
+	}
+
+	if(!newestAutosave)
+		return false;
+
+	logNetwork->info("Resuming the game from %s", newestAutosave->getOriginalName());
+
+	auto mapInfo = std::make_shared<CMapInfo>();
+	mapInfo->saveInit(*newestAutosave);
+	mi = mapInfo;
+	si = CMemorySerializer::deepCopy(*mapInfo->scenarioOptionsOfSave);
+	si->mode = EStartMode::LOAD_GAME;
+	si->mapname = mapInfo->fileURI;
+
+	// the seat of every human player waits until the player rejoins
+	playerNames.clear();
+	for(const auto & [color, playerSettings] : si->playerInfos)
+	{
+		for(const auto & playerId : playerSettings.connectedPlayerIDs)
+		{
+			playerNames[playerId] = ClientPlayer{GameConnectionID::INVALID, playerSettings.name};
+			if(playerId >= currentPlayerId)
+				currentPlayerId = vstd::next(playerId, 1);
+		}
+	}
+
+	// an id that no client gets, the first player that rejoins becomes the host
+	hostClientId = currentClientId;
+	currentClientId = vstd::next(currentClientId, 1);
+
+	if(!prepareToStartGame())
+		throw std::runtime_error("Failed to resume the game from " + newestAutosave->getOriginalName());
+
+	startGameImmediately();
+	return true;
+}
+
+bool CVCMIServer::isHostConnected() const
+{
+	for(const auto & activeConnection : activeConnections)
+		if(isClientHost(activeConnection->connectionID))
+			return true;
+	return false;
+}
+
+void CVCMIServer::announceHostChange()
+{
+	for(const auto & [playerId, player] : playerNames)
+	{
+		if(player.connection != hostClientId)
+			continue;
+
+		MetaString message;
+		message.appendTextID("vcmi.lobby.system.hostChanged");
+		message.replaceRawString(player.name);
+		announceTxt(message);
+		return;
+	}
+}
+
+void CVCMIServer::passHostToConnectedClient()
+{
+	// a connection that never sent LobbyClientConnected has no id and can not control players
+	const auto newHost = std::ranges::find_if(activeConnections, [](const auto & connection)
+	{
+		return connection->connectionID != GameConnectionID::INVALID;
+	});
+
+	if(newHost == activeConnections.end())
+	{
+		// hostClientId keeps the connection that left, so that no other connection is mistaken for the host
+		logNetwork->info("No client is connected, the game waits until a player rejoins it");
+		return;
+	}
+
+	hostClientId = (*newHost)->connectionID;
+	logNetwork->info("Connection %d is the new host and controls the AI players", static_cast<int>(hostClientId));
+	announceHostChange();
+
+	// the client has to install the interfaces of the AI players before they are asked anything
+	updateAndPropagateLobbyState();
+	gh->handleHostChange(hostClientId);
+}
+
+std::vector<PlayerConnectionID> CVCMIServer::chooseRejoinSeats(const std::vector<RejoinCandidate> & seats, const std::vector<std::string> & names, const std::string & deviceId)
+{
+	std::vector<PlayerConnectionID> result;
+
+	for(const auto & name : names)
+	{
+		std::vector<const RejoinCandidate *> candidates;
+		for(const auto & seat : seats)
+		{
+			if(seat.name == name && !vstd::contains(result, seat.playerId))
+				candidates.push_back(&seat);
+		}
+
+		auto isOfDevice = [&deviceId](const RejoinCandidate * seat)
+		{
+			return !deviceId.empty() && seat->deviceId == deviceId;
+		};
+
+		const RejoinCandidate * chosen = nullptr;
+		for(const auto * seat : candidates)
+		{
+			if(!chosen && !seat->online && isOfDevice(seat))
+				chosen = seat;
+		}
+
+		for(const auto * seat : candidates)
+		{
+			if(!chosen && seat->online && seat->replaceable && isOfDevice(seat))
+				chosen = seat;
+		}
+
+		// e.g. after a restart of the server
+		for(const auto * seat : candidates)
+		{
+			if(!chosen && !seat->online && seat->deviceId.empty())
+				chosen = seat;
+		}
+
+		// e.g. after the app was reinstalled, only when the name identifies the seat
+		if(!chosen && candidates.size() == 1 && !candidates.front()->online)
+			chosen = candidates.front();
+
+		if(chosen)
+			result.push_back(chosen->playerId);
+	}
+	return result;
+}
+
+CVCMIServer::RejoinSeats CVCMIServer::findPlayersToRejoin(const std::vector<std::string> & names, const std::string & deviceId) const
+{
+	std::vector<RejoinCandidate> candidates;
+
+	for(const auto & [playerId, player] : playerNames)
+	{
+		bool hasColorInGame = false;
+		for(const auto & playerInfo : si->playerInfos)
+		{
+			if(!vstd::contains(playerInfo.second.connectedPlayerIDs, playerId))
+				continue;
+
+			const auto * playerState = gh->gameInfo().getPlayerState(playerInfo.first, false);
+			if(playerState && playerState->status == EPlayerStatus::INGAME)
+				hasColorInGame = true;
+		}
+
+		if(!hasColorInGame)
+			continue;
+
+		RejoinCandidate candidate;
+		candidate.playerId = playerId;
+		candidate.name = player.name;
+		candidate.online = player.connection != GameConnectionID::INVALID;
+		// a server started by a client stops when its host leaves
+		candidate.replaceable = candidate.online && !(wasStartedByClient() && isClientHost(player.connection));
+		if(vstd::contains(playerDevices, playerId))
+			candidate.deviceId = playerDevices.at(playerId);
+		candidates.push_back(candidate);
+	}
+
+	RejoinSeats result;
+	result.players = chooseRejoinSeats(candidates, names, deviceId);
+
+	for(const auto & playerId : result.players)
+	{
+		const auto connectionID = playerNames.at(playerId).connection;
+		if(connectionID == GameConnectionID::INVALID)
+			continue;
+
+		const auto stale = std::ranges::find_if(activeConnections, [connectionID](const auto & activeConnection)
+		{
+			return activeConnection->connectionID == connectionID;
+		});
+
+		if(stale == activeConnections.end())
+			throw std::runtime_error("Player " + std::to_string(static_cast<int>(playerId)) + " is at a connection that does not exist");
+
+		if(!vstd::contains(result.staleConnections, *stale))
+			result.staleConnections.push_back(*stale);
+	}
+	return result;
+}
+
+void CVCMIServer::clientRejoining(std::shared_ptr<GameConnection> connection, LobbyClientConnected & pack)
+{
+	assert(getState() == EServerState::GAMEPLAY);
+	assert(isPendingConnection(connection));
+
+	connection->connectionID = currentClientId;
+	currentClientId = vstd::next(currentClientId, 1);
+	connection->uuid = pack.uuid;
+
+	pack.clientId = connection->connectionID;
+	pack.mode = si->mode;
+	pack.hostClientId = hostClientId;
+	connection->sendPack(pack);
+
+	const auto seats = findPlayersToRejoin(pack.names, deviceIdOf(pack.uuid));
+	const auto & rejoinedPlayerIds = seats.players;
+
+	// the gamestate is sent as written by this server, an older client can not read it
+	LobbyRejoinGame rejoinGame;
+	if(rejoinedPlayerIds.empty() || pack.version < ESerializationVersion::CURRENT || !gh->fillRejoinGamestate(rejoinGame))
+	{
+		logNetwork->info("Connection %d can not rejoin the game", static_cast<int>(connection->connectionID));
+		LobbyShowMessage message;
+		message.message.appendTextID("vcmi.lobby.system.rejoinRefused");
+		connection->sendPack(message);
+		return;
+	}
+
+	for(const auto & stale : seats.staleConnections)
+	{
+		logNetwork->info("Connection %d is replaced by connection %d of the same device", static_cast<int>(stale->connectionID), static_cast<int>(connection->connectionID));
+		if(auto networkConnection = stale->getConnection())
+			networkConnection->close();
+		clientDisconnected(stale);
+	}
+
+	const bool hostWasConnected = isHostConnected();
+
+	vstd::erase(pendingConnections, connection);
+	activeConnections.push_back(connection);
+	connection->setCallback(gh->gameInfo());
+
+	for(const auto & playerId : rejoinedPlayerIds)
+	{
+		auto & player = playerNames.at(playerId);
+		player.connection = connection->connectionID;
+		if(!deviceIdOf(pack.uuid).empty())
+			playerDevices[playerId] = deviceIdOf(pack.uuid);
+		logNetwork->info("Player rejoined the game: name='%s', playerId=%d, connectionId=%d", player.name, static_cast<int>(playerId), static_cast<int>(connection->connectionID));
+
+		MetaString joinMessage;
+		joinMessage.appendTextID("vcmi.lobby.system.playerJoined");
+		joinMessage.replaceRawString(player.name);
+		announceTxt(joinMessage);
+	}
+
+	// nobody was connected, the first player that rejoins takes over the AI players
+	if(!hostWasConnected)
+	{
+		hostClientId = connection->connectionID;
+		logNetwork->info("Connection %d is the new host and controls the AI players", static_cast<int>(hostClientId));
+		announceHostChange();
+	}
+
+	updateAndPropagateLobbyState();
+
+	connection->sendPack(rejoinGame);
+
+	gh->handleClientRejoin(connection->connectionID);
 }
 
 void CVCMIServer::setPlayerConnectedId(PlayerSettings & pset, PlayerConnectionID player) const
@@ -1238,6 +1625,15 @@ bool CVCMIServer::hasBothPlayersAtSameConnection(PlayerColor left, PlayerColor r
 {
 	for (const auto & c : activeConnections)
 		if (hasPlayerAt(left, c->connectionID) && hasPlayerAt(right, c->connectionID))
+			return true;
+
+	return false;
+}
+
+bool CVCMIServer::isPlayerConnected(PlayerColor player) const
+{
+	for (const auto & c : activeConnections)
+		if (hasPlayerAt(player, c->connectionID))
 			return true;
 
 	return false;

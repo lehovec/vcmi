@@ -314,7 +314,8 @@ void TurnOrderProcessor::doStartPlayerTurn(PlayerColor which)
 
 	ActivityPtr turnPause;
 
-	if(timersActive && isHuman)
+	// an offline player can not accept the turn, their timer keeps running instead
+	if(timersActive && isHuman && gameHandler->isPlayerConnected(which))
 	{
 		// Added by the routine below and not here, so that the turn-start visits queue up
 		// behind it instead of reaching the player before they accepted their turn
@@ -344,6 +345,7 @@ void TurnOrderProcessor::doStartPlayerTurn(PlayerColor which)
 		// turn-start visits (e.g. Battle Scholar Academy) start producing dialogs.
 		gameHandler->sendAndApply(pst);
 		startTurn();
+		gameHandler->notifyHumanTurnStart(which);
 	}
 	else
 	{
@@ -457,6 +459,13 @@ void TurnOrderProcessor::onGameStarted()
 void TurnOrderProcessor::tryStartTurnsForPlayers()
 {
 	auto awaitingPlayersCopy = awaitingPlayers;
+
+	const bool humanTurnStarts = std::ranges::any_of(awaitingPlayersCopy, [this](PlayerColor player)
+	{
+		return canStartTurn(player) && gameHandler->gameInfo().getPlayerState(player)->isHuman();
+	});
+	if(humanTurnStarts)
+		gameHandler->autosaveBeforeHumanTurn();
 	for (auto player : awaitingPlayersCopy)
 	{
 		if (canStartTurn(player))

@@ -32,11 +32,93 @@
 #include "../luascript/LuaModule.h"
 
 #include <boost/program_options.hpp>
+#include <boost/uuid/random_generator.hpp>
+#include <boost/uuid/uuid_io.hpp>
+
+#if BOOST_VERSION >= 108600
+// TODO: upgrade code to use v2 API instead of deprecated v1
+#include <boost/process/v1/child.hpp>
+#include <boost/process/v1/search_path.hpp>
+namespace bprocess = boost::process::v1;
+#else
+#include <boost/process/child.hpp>
+#include <boost/process/search_path.hpp>
+namespace bprocess = boost::process;
+#endif
 
 #include <vcmi/scripting/Service.h>
 
 static const std::string SERVER_NAME_AFFIX = "server";
 static const std::string SERVER_NAME = std::string(GameConstants::VCMI_PROJECT_NAME_VERSIONED) + " (" + SERVER_NAME_AFFIX + ')';
+
+/// Runs the command of --on-turn-start with the player name, color, day, "online" or "offline" and the notification topic
+class TurnStartCommand
+{
+	boost::filesystem::path command;
+	std::vector<std::unique_ptr<bprocess::child>> running;
+
+public:
+	explicit TurnStartCommand(boost::filesystem::path command)
+		: command(std::move(command))
+	{
+	}
+
+	void run(const HumanTurnStart & turnStart)
+	{
+		std::erase_if(running, [](const auto & child)
+		{
+			std::error_code ec;
+			return !child->running(ec);
+		});
+
+		// arguments are passed without a shell, a player name can not inject a command
+		std::vector<std::string> args = {turnStart.name, turnStart.player.toString(), std::to_string(turnStart.day), turnStart.online ? "online" : "offline", turnStart.topic};
+
+		std::error_code ec;
+		auto child = std::make_unique<bprocess::child>(command, args, ec);
+		if(ec)
+		{
+			logGlobal->error("Failed to run %s for the turn of %s: %s", command.string(), turnStart.name, ec.message());
+			return;
+		}
+
+		logGlobal->info("Running %s for the turn of %s", command.string(), turnStart.name);
+		running.push_back(std::move(child));
+	}
+};
+
+/// A command without a directory is searched in PATH, a relative path is relative to the directory the server was started in
+static boost::filesystem::path findTurnStartCommand(const std::string & command, const boost::filesystem::path & launchDirectory)
+{
+	const boost::filesystem::path commandPath(command);
+	if(commandPath.has_parent_path())
+		return boost::filesystem::absolute(commandPath, launchDirectory);
+	return bprocess::search_path(command);
+}
+
+/// Secret of this server installation, created on first use. Notification topics derived from it stay the same after a restart
+static std::string loadNotificationSecret()
+{
+	const auto path = VCMIDirs::get().userConfigPath() / "notification-secret.txt";
+
+	if(boost::filesystem::exists(path))
+	{
+		std::ifstream file(path.c_str());
+		std::string secret;
+		std::getline(file, secret);
+		if(secret.empty())
+			throw std::runtime_error("Notification secret in " + path.string() + " is empty");
+		return secret;
+	}
+
+	const auto secret = boost::uuids::to_string(boost::uuids::random_generator()());
+	std::ofstream file(path.c_str());
+	file << secret << '\n';
+	if(!file)
+		throw std::runtime_error("Failed to write notification secret to " + path.string());
+	logGlobal->info("Created notification secret in %s", path.string());
+	return secret;
+}
 
 static void exportLuaApiDocs(const boost::filesystem::path & outPath)
 {
@@ -239,7 +321,9 @@ static void handleCommandOptions(int argc, const char * argv[], boost::program_o
 	("translate-mod", boost::program_options::value<std::string>(), "Export translations for specified mod")
 	("export-lua-docs", boost::program_options::value<std::string>(), "Export Lua scripting API documentation to specified directory")
 	("port", boost::program_options::value<ui16>(), "port at which server will listen to connections from client")
-	("lobby", "start server in lobby mode in which server connects to a global lobby");
+	("lobby", "start server in lobby mode in which server connects to a global lobby")
+	("resume", "resume the game of the newest autosave, players rejoin it under their names")
+	("on-turn-start", boost::program_options::value<std::string>(), "command to run when the turn of a human player starts, with the player name, color, day, online or offline and the notification topic of the player as arguments");
 
 	if(argc > 1)
 	{
@@ -291,6 +375,8 @@ static void handleCommandOptions(int argc, const char * argv[], boost::program_o
 
 int main(int argc, const char * argv[])
 {
+	const auto launchDirectory = boost::filesystem::current_path();
+
 	// Correct working dir executable folder (not bundle folder) so we can use executable relative paths
 	boost::filesystem::current_path(boost::filesystem::system_complete(argv[0]).parent_path());
 
@@ -301,6 +387,7 @@ int main(int argc, const char * argv[])
 
 	boost::program_options::variables_map opts;
 	handleCommandOptions(argc, argv, opts);
+	int exitCode = 0;
 	LIBRARY = new GameLibrary;
 	LIBRARY->initializeFilesystem(false);
 	logConfigurator.configure();
@@ -311,22 +398,56 @@ int main(int argc, const char * argv[])
 	{
 		CreatureValueEstimator::run();
 	}
+	else if(opts.count("on-turn-start") && !boost::filesystem::exists(findTurnStartCommand(opts["on-turn-start"].as<std::string>(), launchDirectory)))
+	{
+		logGlobal->error("Command %s for --on-turn-start does not exist", opts["on-turn-start"].as<std::string>());
+		exitCode = 1;
+	}
 	else if(!opts.count("dummy-run"))
 	{
 		bool connectToLobby = opts.count("lobby");
-		bool runByClient = opts.count("runByClient");
+		bool runByClient = opts.count("run-by-client");
 		uint16_t port = settings["server"]["localPort"].Integer();
 		if(opts.count("port"))
 			port = opts["port"].as<uint16_t>();
 
 		CVCMIServer server(port, runByClient);
+
+		if(opts.count("on-turn-start"))
+		{
+			auto turnStartCommand = std::make_shared<TurnStartCommand>(findTurnStartCommand(opts["on-turn-start"].as<std::string>(), launchDirectory));
+			server.humanTurnStartListener = [turnStartCommand](const HumanTurnStart & turnStart)
+			{
+				turnStartCommand->run(turnStart);
+			};
+			server.notificationSecret = loadNotificationSecret();
+		}
+
 		server.prepare(connectToLobby, true);
-		server.run();
+
+		bool resumeFailed = false;
+		if(opts.count("resume"))
+		{
+			try
+			{
+				if(!server.resumeNewestAutosave())
+					logGlobal->info("No autosave to resume, waiting for players in the lobby");
+			}
+			catch(const std::exception & e)
+			{
+				logGlobal->error("Failed to resume the game: %s", e.what());
+				resumeFailed = true;
+				exitCode = 1;
+			}
+		}
+
+		if(!resumeFailed)
+			server.run();
 		// CVCMIServer destructor must be called here - before LIBRARY cleanup
 	}
 
 	logConfigurator.deconfigure();
 
 	delete LIBRARY;
-	return 0;
+	return exitCode;
 }

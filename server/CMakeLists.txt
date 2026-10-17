@@ -53,6 +53,7 @@ set(vcmiservercommon_HEADERS
 		CGameHandler.h
 		CreatureValueEstimator.h
 		GlobalLobbyProcessor.h
+		HumanTurnStart.h
 		IGameServer.h
 		ServerSpellCastEnvironment.h
 		CVCMIServer.h

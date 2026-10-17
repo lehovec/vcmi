@@ -17,6 +17,7 @@
 #include "../lib/networkPacks/PacksForServer.h"
 #include "../lib/serializer/GameConnectionID.h"
 #include "../lib/serializer/PlayerConnectionID.h"
+#include "HumanTurnStart.h"
 
 struct SideInBattle;
 class IMarket;
@@ -29,6 +30,7 @@ class StatisticDataSet;
 class ServerCallback;
 
 struct StartInfo;
+struct LobbyRejoinGame;
 struct TerrainTile;
 struct CPackForServer;
 struct NewTurn;
@@ -219,9 +221,34 @@ public:
 
 	void init(StartInfo *si, Load::ProgressAccumulator & progressTracking);
 	void handleClientDisconnection(GameConnectionID connectionID, const std::vector<PlayerConnectionID> & disconnectedPlayerIds = {});
+	/// Gamestate for a client that rejoins the game. Returns false if it can not be restored.
+	bool fillRejoinGamestate(LobbyRejoinGame & pack);
+	/// Notifies other players and sends the client of a rejoined player everything that waits for its players
+	void handleClientRejoin(GameConnectionID connectionID);
+	/// Sends the new host everything that waits for the AI players and the neutral side it now controls
+	void handleHostChange(GameConnectionID connectionID);
+	/// A dedicated server keeps a save of its own, to resume the game after a restart
+	void autosaveBeforeHumanTurn();
+
+	HumanTurnStartListener humanTurnStartListener;
+	void notifyHumanTurnStart(PlayerColor player);
+	/// Secret of the server that notification topics are derived from, empty if the server sends no notifications
+	std::string notificationSecret;
+	/// Short topic, e.g. of an ntfy app, under which the player gets turn notifications. Stays the same for the game after a restart of the server
+	std::string notificationTopic(PlayerColor player) const;
+	/// Sends the topics of the human players at the connection to its client. Returns false if the server sends no notifications
+	bool sendNotificationTopics(GameConnectionID connectionID);
+	/// True while a human player can still play, the game is not over
+	bool hasHumanPlayerInGame() const;
 	void handleReceivedPack(GameConnectionID connectionId, CPackForServer & pack);
 	bool hasPlayerAt(PlayerColor player, GameConnectionID connectionId) const;
 	bool hasBothPlayersAtSameConnection(PlayerColor left, PlayerColor right) const;
+	/// Whether a connected client controls this player
+	bool isPlayerConnected(PlayerColor player) const;
+	/// Players in game, AI players and the neutral side that are controlled from the connection
+	std::vector<PlayerColor> playersAtConnection(GameConnectionID connectionID) const;
+	/// Sends the questions, turn start and battles of these players again, to a client that has just taken control of them
+	void repeatPendingPacks(GameConnectionID connectionID, const std::vector<PlayerColor> & players);
 
 	bool answerQuestion( QuestionID questionID, std::optional<int32_t> reply, PlayerColor player );
 	bool buildBoat( ObjectInstanceID objid, PlayerColor player );

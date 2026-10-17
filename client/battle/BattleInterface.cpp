@@ -721,7 +721,8 @@ void BattleInterface::endAction(const BattleAction &action)
 	windowObject->updateQueue();
 
 	//stack ended movement in tactics phase -> select the next one
-	if (isInTacticsMode())
+	//an autofighting tactician ends the phase itself, a selected stack would start another tactics action
+	if (isInTacticsMode() && !tacticianInterface->isAutoFightOn)
 		tacticNextStack(stack);
 
 	//we have activated next stack after sending request that has been just realized -> blockmap due to movement has changed

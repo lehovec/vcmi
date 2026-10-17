@@ -161,6 +161,20 @@ struct DLL_LINKAGE SimturnsContactStatus : public CPackForClient
 	}
 };
 
+/// Pack that was sent before a player rejoined the game, sent again to the client of that player.
+/// The gamestate the client received already contains its effects, so only the interfaces are notified.
+struct DLL_LINKAGE PackRepeatedOnRejoin : public CPackForClient
+{
+	std::shared_ptr<CPackForClient> pack;
+
+	void visitTyped(ICPackVisitor & visitor) override;
+
+	template <typename Handler> void serialize(Handler & h)
+	{
+		h & pack;
+	}
+};
+
 struct DLL_LINKAGE PlayerBlocked : public CPackForClient
 {
 	enum EReason { UPCOMING_BATTLE, ONGOING_MOVEMENT };

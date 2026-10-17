@@ -82,13 +82,25 @@ void ClientPermissionsCheckerNetPackVisitor::visitLobbyQuickLoadGame(LobbyQuickL
 
 void ClientPermissionsCheckerNetPackVisitor::visitLobbyClientConnected(LobbyClientConnected & pack)
 {
-	result = srv.getState() == EServerState::LOBBY;
+	if(srv.getState() == EServerState::GAMEPLAY)
+		result = srv.isPendingConnection(connection);
+	else
+		result = srv.getState() == EServerState::LOBBY;
 }
 
 void ApplyOnServerNetPackVisitor::visitLobbyClientConnected(LobbyClientConnected & pack)
 {
 	auto compatibleVersion = std::min(pack.version, ESerializationVersion::CURRENT);
 	connection->setSerializationVersion(compatibleVersion);
+
+	if(srv.getState() == EServerState::GAMEPLAY)
+	{
+		// the reply goes only to the rejoining client, other clients are not in lobby
+		pack.version = compatibleVersion;
+		srv.clientRejoining(connection, pack);
+		result = false;
+		return;
+	}
 
 	srv.clientConnected(connection, pack.names, pack.uuid, pack.mode);
 
@@ -134,9 +146,10 @@ void ClientPermissionsCheckerNetPackVisitor::visitLobbyClientDisconnected(LobbyC
 
 void ApplyOnServerNetPackVisitor::visitLobbyClientDisconnected(LobbyClientDisconnected & pack)
 {
+	// other clients never learned about a connection that did not rejoin the game
+	result = !srv.isPendingConnection(connection);
 	connection->getConnection()->close();
 	srv.clientDisconnected(connection);
-	result = true;
 }
 
 void ApplyOnServerAfterAnnounceNetPackVisitor::visitLobbyClientDisconnected(LobbyClientDisconnected & pack)

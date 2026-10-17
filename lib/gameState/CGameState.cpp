@@ -1834,12 +1834,13 @@ std::vector<std::byte> CGameState::saveToMemory()
 	return serializer.extractBuffer();
 }
 
-void CGameState::loadFromMemory(std::vector<std::byte> data)
+void CGameState::loadFromMemory(std::vector<std::byte> data, ESerializationVersion version)
 {
 	// battles are not part of serialize(), so leftovers of the discarded state have to go explicitly
 	currentBattles.clear();
 
 	CMemorySerializer serializer(std::move(data));
+	serializer.iser.version = version;
 	serializer.iser.loadingGamestate = true;
 	serializer.iser.cb = this;
 	serializer.iser & *this;

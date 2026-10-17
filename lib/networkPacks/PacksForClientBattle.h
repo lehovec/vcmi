@@ -42,6 +42,24 @@ struct DLL_LINKAGE BattleStart : public CPackForClient
 	}
 };
 
+/// Opens a battle in progress on a client that has just taken control of some of its sides.
+/// The battle is already in the gamestate of the client, it has no effect on the gamestate.
+struct DLL_LINKAGE BattleResumed : public CPackForClient
+{
+	BattleID battleID = BattleID::NONE;
+	/// Sides of the battle that the client has just taken control of, interfaces of other sides already show it
+	std::vector<PlayerColor> players;
+
+	void visitTyped(ICPackVisitor & visitor) override;
+
+	template <typename Handler> void serialize(Handler & h)
+	{
+		h & battleID;
+		h & players;
+		assert(battleID != BattleID::NONE);
+	}
+};
+
 struct DLL_LINKAGE BattleNextRound : public CPackForClient
 {
 	BattleID battleID = BattleID::NONE;

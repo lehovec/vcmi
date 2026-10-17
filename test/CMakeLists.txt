@@ -132,6 +132,7 @@ set(test_SRCS
 		server/battles/TransmutationTest.cpp
 		server/battles/WalkActionTest.cpp
 		server/activities/ActivityProcessorTest.cpp
+		server/RejoinTest.cpp
 
 		texts/TextOperationsTest.cpp
 

@@ -176,6 +176,7 @@ void PlayerMessageProcessor::commandHelp(PlayerColor player, const std::vector<s
 	broadcastSystemMessage(MetaString::createFromTextID("vcmi.broadcast.help.help"));
 	broadcastSystemMessage(MetaString::createFromTextID("vcmi.broadcast.help.cheaters"));
 	broadcastSystemMessage(MetaString::createFromTextID("vcmi.broadcast.help.vote"));
+	broadcastSystemMessage(MetaString::createFromTextID("vcmi.broadcast.help.notify"));
 }
 
 void PlayerMessageProcessor::commandVote(PlayerColor player, const std::vector<std::string> & words)

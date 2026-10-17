@@ -316,4 +316,7 @@ void registerTypes(Serializer &s)
 	s.template registerType<SetQuestHint>(268);
 	s.template registerType<BattleAnimationPlayed>(269);
 	s.template registerType<SimturnsContactStatus>(270);
+	s.template registerType<PackRepeatedOnRejoin>(271);
+	s.template registerType<BattleResumed>(272);
+	s.template registerType<LobbyRejoinGame>(273);
 }

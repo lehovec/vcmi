@@ -817,6 +817,22 @@ void ApplyClientNetPackVisitor::visitBattleStart(BattleStart & pack)
 	cl.battleStarted(pack.battleID);
 }
 
+void ApplyFirstClientNetPackVisitor::visitBattleResumed(BattleResumed & pack)
+{
+	const auto * battle = gs.getBattle(pack.battleID);
+	if(!battle)
+		throw std::runtime_error("Resumed battle " + std::to_string(pack.battleID.getNum()) + " is not in the gamestate");
+
+	for(const auto & player : pack.players)
+		callOnlyThatBattleInterface(cl, player, &IBattleEventsReceiver::battleStartBefore, pack.battleID, battle->getSideArmy(BattleSide::ATTACKER), battle->getSideArmy(BattleSide::DEFENDER),
+			battle->tile, battle->getSideHero(BattleSide::ATTACKER), battle->getSideHero(BattleSide::DEFENDER));
+}
+
+void ApplyClientNetPackVisitor::visitBattleResumed(BattleResumed & pack)
+{
+	cl.battleResumed(pack.battleID, pack.players);
+}
+
 void ApplyFirstClientNetPackVisitor::visitBattleNextRound(BattleNextRound & pack)
 {
 	callBattleInterfaceIfPresentForBothSides(cl, pack.battleID, &IBattleEventsReceiver::battleNewRoundFirst, pack.battleID);
@@ -986,6 +1002,16 @@ void ApplyClientNetPackVisitor::visitPackageApplied(PackageApplied & pack)
 void ApplyClientNetPackVisitor::visitQuestionResolved(QuestionResolved & pack)
 {
 	callAllInterfaces(cl, &IGameEventsReceiver::questionResolved, pack.questionID);
+}
+
+void ApplyFirstClientNetPackVisitor::visitPackRepeatedOnRejoin(PackRepeatedOnRejoin & pack)
+{
+	pack.pack->visit(*this);
+}
+
+void ApplyClientNetPackVisitor::visitPackRepeatedOnRejoin(PackRepeatedOnRejoin & pack)
+{
+	pack.pack->visit(*this);
 }
 
 void ApplyClientNetPackVisitor::visitSystemMessage(SystemMessage & pack)

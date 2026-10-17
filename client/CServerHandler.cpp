@@ -131,7 +131,13 @@ CServerHandler::CServerHandler()
 	, battleMode(false)
 	, client(nullptr)
 {
-	uuid = boost::uuids::to_string(boost::uuids::random_generator()());
+	if(settings["server"]["deviceId"].String().empty())
+	{
+		Settings deviceId = settings.write["server"]["deviceId"];
+		deviceId->String() = boost::uuids::to_string(boost::uuids::random_generator()());
+	}
+
+	uuid = settings["server"]["deviceId"].String() + LobbyClientConnected::DEVICE_ID_SEPARATOR + boost::uuids::to_string(boost::uuids::random_generator()());
 }
 
 void CServerHandler::threadRunNetwork()

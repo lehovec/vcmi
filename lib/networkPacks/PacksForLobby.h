@@ -35,8 +35,11 @@ struct DLL_LINKAGE CLobbyPackToServer : public CPackForLobby
 
 struct DLL_LINKAGE LobbyClientConnected : public CLobbyPackToPropagate
 {
+	/// A client puts its persistent device id and this separator in front of the uuid, to rejoin its seats after a restart
+	static constexpr char DEVICE_ID_SEPARATOR = ':';
+
 	// Set by client before sending pack to server
-	std::string uuid;
+	std::string uuid; ///< unique for each client process
 	std::vector<std::string> names;
 	EStartMode mode = EStartMode::INVALID;
 	// Changed by server before announcing pack
@@ -147,6 +150,28 @@ struct DLL_LINKAGE LobbyStartGame : public CLobbyPackToPropagate
 		h & initializedGameState;
 		if (!h.saving)
 			h.loadingGamestate = false;
+	}
+};
+
+/// Sent instead of LobbyStartGame to a client that rejoins a game in progress.
+/// Battles are not part of a serialized gamestate, so during a battle the client receives the
+/// gamestate that the day started from and every pack the server applied since.
+struct DLL_LINKAGE LobbyRejoinGame : public CLobbyPackToPropagate
+{
+	std::shared_ptr<StartInfo> initializedStartInfo;
+	/// Version that the gamestate and the packs were written with
+	ESerializationVersion version = ESerializationVersion::CURRENT;
+	std::vector<std::byte> gamestate;
+	std::vector<std::vector<std::byte>> packsSinceGamestate;
+
+	void visitTyped(ICPackVisitor & visitor) override;
+
+	template <typename Handler> void serialize(Handler &h)
+	{
+		h & initializedStartInfo;
+		h & version;
+		h & gamestate;
+		h & packsSinceGamestate;
 	}
 };
 
