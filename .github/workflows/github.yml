@@ -28,15 +28,19 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: linux-appimage-x64
-            os: ubuntu-24.04
-            upload: 1
-            preset: linux-gcc-release-appimage
-            conan_profile: linux-x64
-            conan_prebuilts: dependencies-linux-x64
-            before_install: linux_appimage.sh
-            extension: AppImage
-            artifact_platform: x86_64
+          - platform: msvc-x64
+            arch: x64
+            toolset: '14.29'
+            os: windows-2025-vs2026
+            pack: 1
+            upload: 0
+            pack_type: RelWithDebInfo
+            extension: zip
+            preset: windows-msvc-ninja-release
+            conan_profile: msvc-x64
+            conan_prebuilts: dependencies-windows-x64
+            conan_options: -s "&:build_type=RelWithDebInfo" -o "&:target_pre_windows10=True"
+            artifact_platform: x64
 
     runs-on: ${{ matrix.os }}
 
